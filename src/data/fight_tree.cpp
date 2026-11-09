@@ -3,7 +3,9 @@
 // =============================================================================
 #include <cstdlib>
 #include "fight_tree.h"
+#include "../gameplay/game_state.h"
 #include "../guest_memory.h"
+#include "../players/more_players.h"
 
 #include <algorithm>
 #include <atomic>
@@ -16,6 +18,8 @@
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/ppc/func.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/xmemory.h>
 
 #include "data_patcher.h"
 
@@ -27,6 +31,42 @@ namespace {
 uint32_t Be32(const uint8_t* p) {
   return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
 }
+
+// Capture guest fields on the game thread. Native consumers only see the
+// resulting values, so this is the only place that depends on the layout.
+void PublishGameState(const uint8_t* base, int32_t node) {
+  using game_state::Phase;
+  constexpr uint32_t kGameGlobal = 0x8259B190;  // Game object pointer (findings/24 s.6).
+  constexpr uint32_t kMode = 8;                // Game mode (more_players::InPlay).
+  constexpr uint32_t kLevelIndex = 18;         // Current level byte (findings/24 s.6).
+  constexpr uint32_t kPauseFlags = 168;        // Game pause flags (input/mouse_reticle.cpp).
+  constexpr uint32_t kInGameMode = 5;           // Includes in-game menus.
+  constexpr uint8_t kPaused = 0x20;             // Game update's pause bit.
+  constexpr int32_t kTitleLoadFirst = 51, kTitleLoadLast = 53;  // Title load (findings/29 s.7).
+  constexpr int32_t kEnterLevel = 486;  // Before ExitLoadingComplete (findings/29).
+
+  game_state::Snapshot snapshot;
+  if ((node >= kTitleLoadFirst && node <= kTitleLoadLast) ||
+      node == kEnterLevel || more_players::Loading()) {
+    snapshot.phase = Phase::kLoading;
+  } else {
+    const uint32_t game = Be32(GuestPtr(base, kGameGlobal));
+    snapshot.phase = Phase::kFrontEnd;
+    const auto* kernel = rex::system::kernel_state();
+    auto* memory = kernel ? kernel->memory() : nullptr;
+    auto* heap = game && memory ? memory->LookupHeap(game) : nullptr;
+    // Check the complete span before following the object pointer. The
+    // range query also rejects wraparound and ranges that leave this heap.
+    if (heap && heap->QueryRangeAccess(game, game + kPauseFlags) != rex::memory::PageAccess::kNoAccess &&
+        Be32(GuestPtr(base, game + kMode)) == kInGameMode) {
+      snapshot.phase = Phase::kInGame;
+      snapshot.level_id = *GuestPtr(base, game + kLevelIndex);
+      snapshot.paused = (*GuestPtr(base, game + kPauseFlags) & kPaused) != 0;
+    }
+  }
+  game_state::Publish(snapshot);
+}
+
 void PutBe32(uint8_t* p, uint32_t v) {
   p[0] = uint8_t(v >> 24);
   p[1] = uint8_t(v >> 16);
@@ -235,6 +275,7 @@ extern "C" REX_FUNC(sub_8211AF40) {
   if (node) {
     const uint8_t* p = GuestPtr(base, node + 30);
     const int32_t number = int16_t(uint16_t(p[0]) << 8 | p[1]);
+    PublishGameState(base, number);
     Decision decision;
     {
       std::lock_guard lock(g_mutex);
