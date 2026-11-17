@@ -259,6 +259,24 @@ built, what was tested and what wasn't, per AGENTS.md.
 | 8 | Game-look UI: Multiplayer in the main menu, LAN browser, Direct IP, session panel on the Players screen | UI |
 | 9 | Test matrix (s.10), known limitations | |
 
+**E1 with one computer, on Windows.** Two things to know:
+
+* the debug console (`--debug_console`), which runs `replay`, `track` and
+  `clock`, is Linux-only today (a Unix socket, `src/debug_console.cpp`), so
+  exact replays can't be started on Windows yet. Windows 10 1803+ has Unix
+  sockets too (`afunix.h`); porting the console is a debug-tool change only;
+* the cross-machine comparison doesn't need two machines at the same time:
+  a recording (`<log>-inputs.txt`), the save it started from and a `track`
+  CSV can be replayed and tracked later on any other machine, Linux
+  included, and compared with `tools/compare_runs.py`.
+
+Two instances on one computer (each with its own `--user_data_root`,
+`--cache_root`, `--controls_file`, `--log_file`, one with `--audio_mute`;
+started from the exe, the launcher refuses a second game) don't test
+another CPU or OS, but they do test the thread threat: two processes
+loading at once finish their loads at different moments. They are also
+enough for all of phase 3 and most of M1 over `127.0.0.1`.
+
 **Milestone M1**, small and measurable:
 
 * two computers on one LAN, Direct IP, no Steam, no internet;
