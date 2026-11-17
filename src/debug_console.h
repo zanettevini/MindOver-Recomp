@@ -2,7 +2,8 @@
 // debug_console.h -- ask the running game questions (a debugging aid)
 // =============================================================================
 //
-// OFF unless you pass --debug_console=<socket path> (Linux only for now).
+// OFF unless you pass --debug_console=<address>: tcp:<port> (a port on
+// 127.0.0.1, Linux and Windows) or a Unix socket path (Linux).
 //
 // Why it exists: the live FIFO (debug_input_script.h) only goes ONE way: a
 // test script could press buttons, but had to guess what happened from
@@ -11,7 +12,8 @@
 // attach, pauses the game). The console answers: a command goes in, a reply
 // comes back, while the game keeps running.
 //
-// How: a Unix socket. tools/mom.py is the client:
+// How: debug/console_socket.h (TCP on 127.0.0.1, or a Unix socket). tools/mom.py
+// is the client (-s tcp:47100 or -s <socket path>):
 //     tools/mom.py -s <socket> state
 //     tools/mom.py -s <socket> "read [0x8259B190]+80 u32 4"
 //     tools/mom.py -s <socket> "wait state 153 30000" a "wait exit"

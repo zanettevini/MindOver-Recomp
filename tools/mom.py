@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mom.py -- client for the game's debug console (src/debug_console.h).
 
-Start the game with --debug_console=<socket path>, then:
+Start the game with --debug_console=<address>, then:
 
     tools/mom.py -s <socket> state
     tools/mom.py -s <socket> players
@@ -12,7 +12,9 @@ Start the game with --debug_console=<socket path>, then:
 Each argument is one command line, sent in order on one connection; the
 replies are printed. The socket can also come from $MOM_SOCKET. Exit code: 0
 when every command answered "@end ok", 1 at the first error (the rest are not
-sent), 2 when the game isn't reachable. --wait-socket N waits up to N seconds
+sent), 2 when the game isn't reachable. The address is the game's
+--debug_console value: tcp:<port> (127.0.0.1, Linux and Windows; e.g.
+-s tcp:47100) or a Unix socket path (Linux). --wait-socket N waits up to N seconds
 for the socket to appear (a game that is still starting).
 """
 
@@ -23,13 +25,23 @@ import sys
 import time
 
 
+def open_socket(path):
+    """tcp:<port> -> a TCP connection to 127.0.0.1 (the game only listens
+    there); anything else -> a Unix socket path."""
+    if path.startswith("tcp:"):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(("127.0.0.1", int(path[4:])))
+        return s
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(path)
+    return s
+
+
 def connect(path, wait_s):
     deadline = time.monotonic() + wait_s
     while True:
         try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.connect(path)
-            return s
+            return open_socket(path)
         except OSError as e:
             if time.monotonic() >= deadline:
                 print(f"mom.py: can't reach the game at {path}: {e}", file=sys.stderr)
