@@ -1,0 +1,26 @@
+E1 2026-11-17T01:37:17
+A started: pid 6952, console tcp:47101
+A console exit code: 0
+B started: pid 18256, console tcp:47102
+B console exit code: 0
+C started: pid 8848, console tcp:47103
+D started: pid 4880, console tcp:47104
+C console exit code: 0
+D console exit code: 0
+--- A vs B
+A 524 rows, B 524 rows, 524 shared
+pointers (body/ground/steep): same
+IDENTICAL: all 524 shared rows (replay frames 0..130)
+--- C vs D
+A 524 rows, B 524 rows, 524 shared
+pointers (body/ground/steep): same
+IDENTICAL: all 524 shared rows (replay frames 0..130)
+--- A vs C
+A 524 rows, B 524 rows, 524 shared
+pointers (body/ground/steep): same
+IDENTICAL: all 524 shared rows (replay frames 0..130)
+--- A vs D
+A 524 rows, B 524 rows, 524 shared
+pointers (body/ground/steep): same
+IDENTICAL: all 524 shared rows (replay frames 0..130)
+done 2026-11-17T01:39:54
