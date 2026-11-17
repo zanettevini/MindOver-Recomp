@@ -31,12 +31,6 @@
 #include <thread>
 #include <vector>
 
-#if defined(__unix__)
-#include <poll.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
-#endif
 
 #include <fmt/format.h>
 #include <rex/cvar.h>
@@ -48,6 +42,7 @@
 #include <rex/ui/ui_event.h>
 
 #include "cheats/cheats.h"
+#include "debug/console_socket.h"
 #include "debug/guest_stack.h"
 #include "guest_memory.h"
 #include "debug/host_symbols.h"
@@ -66,8 +61,9 @@
 #include "net/net_session.h"
 
 REXCVAR_DEFINE_STRING(debug_console, "", "CrashMoM",
-                      "Debug: a Unix socket at this path answers questions about the running game "
-                      "(memory, players, front end state, waits; client: tools/mom.py)");
+                      "Debug: answers questions about the running game (memory, players, front end "
+                      "state, waits, replay, track; client: tools/mom.py). tcp:<port> = a port "
+                      "on 127.0.0.1 (Linux and Windows); else a Unix socket path (Linux)");
 
 namespace debug_console {
 namespace {
@@ -1189,77 +1185,18 @@ std::string Run(std::string_view line) {
 }
 
 // -----------------------------------------------------------------------------
-// 4. The socket (Linux)
+// 4. The connection: debug/console_socket.h (Unix socket or tcp:<port>,
+//    Linux and Windows; findings/68 s.5)
 // -----------------------------------------------------------------------------
 
-#if defined(__unix__)
-bool SendAll(int fd, std::string_view text) {
-  while (!text.empty()) {
-    const ssize_t n = send(fd, text.data(), text.size(), MSG_NOSIGNAL);
-    if (n <= 0) return false;
-    text.remove_prefix(size_t(n));
+// One command line -> its reply, ending with the "@end" line the client reads.
+std::string Answer(const std::string& line) {
+  try {
+    return Run(line) + "@end ok\n";
+  } catch (const Error& e) {
+    return "@end error " + e.what + "\n";
   }
-  return true;
 }
-
-void Serve(int fd) {
-  std::string pending;
-  char buf[512];
-  for (;;) {
-    const ssize_t n = recv(fd, buf, sizeof(buf), 0);
-    if (n <= 0) break;
-    pending.append(buf, size_t(n));
-    size_t eol;
-    while ((eol = pending.find('\n')) != std::string::npos) {
-      std::string line = pending.substr(0, eol);
-      pending.erase(0, eol + 1);
-      if (!line.empty() && line.back() == '\r') line.pop_back();
-      std::string reply;
-      try {
-        reply = Run(line) + "@end ok\n";
-      } catch (const Error& e) {
-        reply = "@end error " + e.what + "\n";
-      }
-      if (!SendAll(fd, reply)) {
-        close(fd);
-        return;
-      }
-    }
-  }
-  close(fd);
-}
-
-void Listen(std::string path) {
-  const int server = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  sockaddr_un address{};
-  address.sun_family = AF_UNIX;
-  if (server < 0 || path.size() >= sizeof(address.sun_path)) {
-    REXLOG_ERROR("Debug console: can't use {} (path too long, or no socket)", path);
-    return;
-  }
-  std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
-  unlink(path.c_str());  // a stale socket from an earlier run
-  if (bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 ||
-      listen(server, 8) != 0) {
-    REXLOG_ERROR("Debug console: can't listen on {}: {}", path, std::strerror(errno));
-    close(server);
-    return;
-  }
-  REXLOG_INFO("Debug console: listening on {} (client: tools/mom.py)", path);
-  for (;;) {
-    const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
-    if (client < 0) {
-      if (errno == EINTR) continue;
-      REXLOG_ERROR("Debug console: accept failed: {}", std::strerror(errno));
-      break;
-    }
-    // One thread per connection (a `wait` may take a while). Detached: the
-    // process ends with _Exit anyway (ReXApp::OnClosing).
-    std::thread(Serve, client).detach();
-  }
-  close(server);
-}
-#endif
 
 }  // namespace
 
@@ -1268,11 +1205,7 @@ void Start(UiPoster run_on_ui_thread, rex::ui::Window* window) {
   if (path.empty()) return;
   g_post = std::move(run_on_ui_thread);
   g_window = window;
-#if defined(__unix__)
-  std::thread(Listen, path).detach();
-#else
-  REXLOG_ERROR("Debug console: only supported on Linux ({} ignored)", path);
-#endif
+  std::thread([path] { console_socket::Serve(path, Answer); }).detach();
 }
 
 }  // namespace debug_console

@@ -40,6 +40,7 @@ set(CRASHMOM_SOURCES
     src/crash_report.cpp         # a crash writes its named call stack into the log + crash-*.txt
     src/debug/host_symbols.cpp   # host code address -> function name / original PowerPC instruction
     src/debug/guest_stack.cpp    # the game's call stack (PowerPC back chain), read fault-safely
+    src/debug/console_socket.cpp # the debug console's connection: tcp:<port> on 127.0.0.1 (Linux + Windows) or a Unix socket
     src/debug/slow_load_sampler.cpp  # a crawling title load: sample the main thread, log where it is
     src/debug/write_watchpoints.cpp  # debug console `who`: which code writes a memory range
     src/debug/world_hash.cpp     # debug console `worldhash`: the world's fingerprint per frame (exact-run checks)
@@ -185,8 +186,9 @@ endif()
 # Links the generated code + runtime, adds the codegen dependency.
 rexglue_setup_target(crash_mom)
 
-# Windows sockets (Winsock 2) for the LAN co-op session (src/net/net_session.cpp:
-# its socket code has a Windows branch). Linux needs nothing extra.
+# Windows sockets (Winsock 2): the LAN co-op session (src/net/net_session.cpp)
+# and the debug console's tcp:<port> address (src/debug/console_socket.cpp).
+# Linux needs nothing extra.
 if(WIN32)
     target_link_libraries(crash_mom PRIVATE ws2_32)
 endif()
