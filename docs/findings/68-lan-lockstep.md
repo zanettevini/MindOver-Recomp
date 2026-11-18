@@ -639,6 +639,15 @@ normal starts after it no frame waited that long. (The test script got
 `-WaitReplayMs`: a stuck load now ends the run after that long instead of
 15 minutes.)
 
+## 6k. More sessions without a person (protocol 5, the automatic delay)
+
+| Test | Result |
+|---|---|
+| pause menus on the shared input (`lan_host_pause.txt` / `lan_guest_pause.txt`): the host opens and closes the pause menu with START, opens it again and presses B | the same front-end states on the same frames on both PCs ("player 1 pressed START", the menu owner, "controller unlocked" when it closed); in sync on every frame, tracks and fingerprint logs identical |
+| the guest's game killed 40 s in, `--net_drop_after_s=5` | the host: "player 2's PC stopped answering" 2 s later, plays on; player 2 drops out 5 s after that through the game's Drop Out |
+| **30 minutes** of random play with LB (`lan_*_30min.txt`, seeds 77 / 88), Simple and Keep Spinning on | in sync on every frame through session frame 108,810; both players' tracks identical on all 108,051 replay frames (212 co-op state changes on the way: deaths, masks, rejoins); 60.0 fps in the last windows, 59.8 average over the 30 min |
+| 30 more level starts (s.6j's hunt), 10 of them with the 40 ms link | no crash, no stuck load, no drift (the 10 linked ones failed only in the test's track compare: the last track line cut off when the game was closed; `same_track.py` skips it now) |
+
 ## 7. Not yet
 
 * Coming back after a disconnect (late join / reconnect: the plan's milestone M5).

@@ -12,6 +12,8 @@ player 1, the guest player 2, each one's own player driven by a recording
 | `same_track.py` | two `track` files identical row by row? |
 | `fp_first_diff.py` | the first frame where two fingerprint logs differ |
 | `lan_host.txt`, `lan_guest.txt` | 40 s: the host runs circles; the guest presses START at 3 s (joins as the mask), B at 5 s (on foot), then circles the other way |
+| `lan_host_30min.txt`, `lan_guest_30min.txt` | 30 minutes with LB (seeds 77 / 88; `-Frames 110000 -WaitReplayMs 1950000`) |
+| `lan_host_pause.txt`, `lan_guest_pause.txt` | the 40 s recordings with pause menus: the host opens / closes the pause menu with START at 12 / 15 s, opens it at 20 s and presses B at 23 s; the guest the same from 28 s |
 | `lb_host_5min.txt`, `lb_guest_5min.txt` | 5 minutes with LB too (seeds 55 / 66), for `-GameArgs "--simple_spinning=true --keep_spinning=true"` |
 | `lan_host_15min.txt`, `lan_guest_15min.txt` | 15 minutes the same way (seeds 33 / 44; `-Frames 55500`) |
 | `lan_host_5min.txt`, `lan_guest_5min.txt` | 5 minutes of seeded random play (runs, jumps, light / heavy attacks, B), the guest joining the same way |
