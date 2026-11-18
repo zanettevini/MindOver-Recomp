@@ -597,6 +597,23 @@ load that finished a frame late on that copy (the helper threads' rules on
 Windows read thread states from snapshots, 6h), maybe not network related.
 Open: it needs a catch with a debugger, or a run of many level starts.
 
+**A load that never finished, once.** Then 22 level starts in a row (12 s of
+play each; 6 with the bad network, 16 without): 21 in sync, tracks
+identical. In one (no bad network) the HOST's save load never ended: from
+the loading screen on, 6 frames a second for 15 minutes, 160 ms of each
+frame spent waiting for the helper threads to go quiet (frame_rate's "game
+160 ms"), "8,497 gaps of silence" a minute in the sound; no warning (no
+helper let go at the gate, no 30 s timeout). The guest's copy had started
+its session and waited for it. Not seen again in the next 10 starts. To
+catch it next time a frame that waits more than 50 ms for the helper
+threads now says what it saw not quiet last (at most every 2 s): "a frame
+waited N ms for the helper threads (K such waits so far); last seen not
+quiet: runnable game thread <name> / busy (not in a wait): <helper> / timed
+wait due: <helper> / held at the gate / a wait ended (a wake)". In the 10
+normal starts after it no frame waited that long. (The test script got
+`-WaitReplayMs`: a stuck load now ends the run after that long instead of
+15 minutes.)
+
 ## 7. Not yet
 
 * Coming back after a disconnect (late join / reconnect: the plan's milestone M5).

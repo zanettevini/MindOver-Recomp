@@ -126,6 +126,14 @@ constexpr auto kMaxHold = std::chrono::milliseconds(100);
 
 std::atomic<int> g_main_tid{0};  // set when the main thread closes the gate
 
+// WHY A FRAME IS STILL WAITING (logs: WaitUntilQuiet names it when a wait gets
+// long). Written by the main thread only, as AllWaiting / GameThreadRunnable
+// answer "not quiet".
+char g_busy_reason[96] = {};
+void NoteBusy(const char* what, const char* name) {
+  std::snprintf(g_busy_reason, sizeof(g_busy_reason), "%s %s", what, name ? name : "");
+}
+
 // Is the main thread asleep (state S/D in /proc), not running or ready?
 bool MainThreadAsleep() {
 #if defined(_WIN32)
@@ -224,12 +232,16 @@ bool GameThreadRunnable() {
       }
     }
     if (tracked && !helper) continue;  // the port's own threads, main
-    if (helper) return true;
     char comm[32] = {};
     thread_states::NameOf(t.id, comm, sizeof(comm));
+    if (helper) {
+      NoteBusy("runnable helper", comm);
+      return true;
+    }
     const std::string_view name(comm);
     if (name.substr(0, 7) == "XThread" || name.substr(0, 7) == "audio::" ||
         name.substr(0, 8) == "ClipLoad") {
+      NoteBusy("runnable game thread", comm);
       return true;
     }
   }
@@ -319,7 +331,10 @@ bool AllWaiting(int64_t now) {
     if (s.in_wait.load() > 0) {
       // Inside a timed wait whose game-time deadline has come: it wakes
       // within one real slice (1 ms) and then works = not quiet.
-      if (s.deadline_ns.load() <= game_now) return false;
+      if (s.deadline_ns.load() <= game_now) {
+        NoteBusy("timed wait due:", s.name);
+        return false;
+      }
       continue;
     }
     // Busy. Only a thread that has ENDED stops counting (its /proc entry is
@@ -336,9 +351,13 @@ bool AllWaiting(int64_t now) {
       }
       continue;
     }
+    NoteBusy("busy (not in a wait):", s.name);
     return false;
   }
-  if (g_held.load() > 0) return false;  // released, about to work
+  if (g_held.load() > 0) {  // released, about to work
+    NoteBusy("held at the gate", "");
+    return false;
+  }
   return !GameThreadRunnable();
 }
 
@@ -505,11 +524,31 @@ void Wait(PPCContext& ctx, uint8_t* base, RealImport real, int timeout_reg, bool
 void WaitUntilQuiet() {
   if (!REXCVAR_GET(loading_follows_game_frames)) return;
   const auto start = Clock::now();
+  // A LONG WAIT is named (at most once every 2 s): what was seen not quiet
+  // last. (A Windows session once loaded at 6 frames a second for minutes,
+  // 160 ms per frame here, and never finished: findings/68 s.6j.)
+  auto note = [&start] {
+    const auto waited = Clock::now() - start;
+    if (waited < std::chrono::milliseconds(50)) return;
+    static Clock::time_point last{};
+    static int long_waits = 0;
+    ++long_waits;
+    const auto now = Clock::now();
+    if (now - last < std::chrono::seconds(2)) return;
+    last = now;
+    REXLOG_WARN("Loading on game frames: a frame waited {:.0f} ms for the helper threads ({} such waits so far); "
+                "last seen not quiet: {}",
+                std::chrono::duration<double, std::milli>(waited).count(), long_waits, g_busy_reason);
+  };
   while (true) {
     const uint64_t wakes = g_wakes.load();
     if (AllWaiting(NowNs())) {
       std::this_thread::sleep_for(kSettle);
-      if (g_wakes.load() == wakes && AllWaiting(NowNs())) return;
+      if (g_wakes.load() == wakes && AllWaiting(NowNs())) {
+        note();
+        return;
+      }
+      if (g_wakes.load() != wakes) NoteBusy("a wait ended (a wake)", "");
     } else {
       std::this_thread::yield();
     }
