@@ -70,3 +70,81 @@ roster, the frame clock and the desync check.
 4. Every caller of the random generator and its thread.
 5. Whether GameNetworkingSockets links with the project's Clang on both
    systems (dependencies.md s.1).
+
+## 5. The debug console on Windows
+
+The exact-run tools (`replay`, `track`, `clock`: findings/29 s.6) live in
+the debug console, which was a Unix socket only: nothing of E1 could run on
+Windows. `--debug_console=tcp:<port>` now listens on **127.0.0.1 only** (the
+console reads and writes game memory: nothing from the network may reach
+it), on Linux and Windows; a path still means a Unix socket on Linux.
+
+* `src/debug/console_socket.*`: the listening side alone (accept, lines in,
+  replies out), so `winsock2.h` and its macros stay out of the console and
+  the game code (AGENTS.md s.5); `ws2_32` linked on Windows.
+* `tools/mom.py -s tcp:<port>`.
+* Console commands split on spaces: a file path with a space in it (the
+  default install path has several) can't be passed. Relative paths from
+  the game's working folder work.
+
+Tested: a stand-alone echo handler with `mom.py` on Linux; a mingw build of
+the same file for Windows; the game built by the project's Clang on Windows
+answering `state`, `clock`, `replay`, `track` and `players` over TCP.
+
+## 6. E1 on one Windows computer
+
+**Set-up.** The game built from the install's own source tree (the player's
+`program\` and `user\` untouched); every run gets its own copy of one save
+(`--user_data_root`), its own controls file and log, a shared test cache,
+`--fixed_step=30 --ground_grace_ms=0 --audio_mute=true --load_save=1`, the
+real disc files. A PowerShell script starts the game, waits until the
+fixed step is on (a `replay` sent before it is a real-time replay: the
+first try did that), sends `replay <file> onspawn` and `track <file> N`,
+waits for the end, stops the process. Runs A then B one after the other,
+then C and D **at the same time** (two game processes loading and playing
+side by side, competing for the disc, the CPU and the GPU). `same.py`
+compares two tracks row by row on the replay frame (the absolute frame
+counts from launch and differs with the load time): every printed value
+must be the same text, and the guest addresses are reported apart.
+
+**Wrong turns** (each cost a run): the replay sent before the fixed step
+was on counted real time; a track length counted from the first frame in
+play (loading frames included) ended before the replay did; PowerShell
+resolves an alias before a function (`Compare` ran `Compare-Object`) and an
+`if` expression flattens a one-element list of lists.
+
+**Results**, a save at the start of the game (Wumpa Island):
+
+| Recording | Frames compared | A vs B | C vs D (same time) | A vs C, A vs D |
+|---|---|---|---|---|
+| a walk: run, jump, turn (`walk.txt`) | 131 x 4 players | identical | identical | identical |
+| 40 s in circles: runs, jumps, light and heavy attacks, two mojos collected, ground lost and found many times (`circle.txt`) | 1,216 x 4 players | identical | identical | identical |
+
+Identical means every column: positions, velocities and the drawn matrix
+to 5 decimals, ground and steep contact objects, and the bodies' guest
+addresses: even two processes loading at the same time built the same
+heap.
+
+These two runs had no enemies near the save. The world row of `track`
+(below) was added for the enemies, then saves were scouted for one with
+fighting near its start (`-Scout`: one run, its summary): a later save,
+player 1 riding a titan (Roller) with enemies around, 21-23 other
+damageable characters, was used for:
+
+| Recording | Frames compared | A vs B | C vs D (same time) | A vs C, A vs D |
+|---|---|---|---|---|
+| `circle.txt` on the titan save | 1,216 x (4 players + the world row) | identical | identical | identical |
+
+In that run the titan lost hitpoints (40 -> 37 of 100), two of the other
+characters went (23 -> 21) and their hitpoints changed six times: the world
+fingerprint (positions and hitpoints of every one of them) was the same on
+every frame of all four runs.
+
+Still not covered: a level change, a cutscene with dialogue, 10 minutes, a
+second player, another CPU, Linux.
+
+**The world row.** `track` now writes, every frame, a row with player 0:
+how many other damageable characters the game updated last frame
+(`cheats::ForEachDamageable`, the list the cheats already keep), the sums
+of their positions and hitpoints, and a 64-bit FNV-1a hash of each one's
+address, exact position bits and hitpoint bits.

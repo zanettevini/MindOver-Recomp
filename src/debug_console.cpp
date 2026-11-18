@@ -986,7 +986,11 @@ void TrackFrame(void* user) {
   // x y z = the sum of their positions, vx = the sum of their hitpoints (for
   // reading); ground : steep = a 64-bit FNV-1a hash of each one's address,
   // exact position bits and hitpoint bits (for comparing: two runs of the
-  // same replay must give the same hash on every frame).
+  // same replay must give the same hash on every frame); vy : vz = the same
+  // WITHOUT the addresses and independent of their order (the sum of one
+  // hash per character), so a different heap layout can be told apart from
+  // a different world (findings/68 s.6: one run of four placed a new enemy
+  // elsewhere in memory).
   uint64_t hash = 1469598103934665603ull;
   auto mix = [&hash](uint32_t word) {
     for (int b = 0; b < 4; ++b) {
@@ -994,6 +998,7 @@ void TrackFrame(void* user) {
       hash *= 1099511628211ull;
     }
   };
+  uint64_t layout_free = 0;  // sum of one FNV-1a hash per character (no address)
   uint32_t count = 0;
   double sum[3] = {}, hitpoints = 0.0;
   cheats::ForEachDamageable([&](uint32_t actor, uint32_t damageable) {
@@ -1006,15 +1011,25 @@ void TrackFrame(void* user) {
       if (player) return;
       const uint32_t m = ReadBE(actor + 44, 4);
       mix(actor);
+      uint64_t own = 1469598103934665603ull;
+      auto mix_own = [&own](uint32_t word) {
+        for (int b = 0; b < 4; ++b) {
+          own ^= (word >> (8 * b)) & 0xFF;
+          own *= 1099511628211ull;
+        }
+      };
       for (int i = 0; i < 3; ++i) {
         const uint32_t bits = ReadBE(m + 48 + 4 * i, 4);
         mix(bits);
+        mix_own(bits);
         float f;
         std::memcpy(&f, &bits, 4);
         sum[i] += f;
       }
       const uint32_t hp_bits = ReadBE(ReadBE(damageable + 64, 4), 4);  // +64 -> hitpoints
       mix(hp_bits);
+      mix_own(hp_bits);
+      layout_free += own;
       float hp;
       std::memcpy(&hp, &hp_bits, 4);
       hitpoints += hp;
@@ -1023,9 +1038,10 @@ void TrackFrame(void* user) {
       mix(0xDEADu);  // unreadable this frame: still part of the fingerprint
     }
   });
-  std::fprintf(t.file, "%lld,%lld,%.3f,0,%08X,%.5f,%.5f,%.5f,%.5f,0,0,%08X,%08X,0,0,0\n",
+  std::fprintf(t.file, "%lld,%lld,%.3f,0,%08X,%.5f,%.5f,%.5f,%.5f,%08X,%08X,%08X,%08X,0,0,0\n",
                (long long)frame, (long long)replay_frame, t_ms, count, sum[0], sum[1], sum[2],
-               hitpoints, uint32_t(hash >> 32), uint32_t(hash));
+               hitpoints, uint32_t(layout_free >> 32), uint32_t(layout_free),
+               uint32_t(hash >> 32), uint32_t(hash));
   ++t.rows;
 }
 
