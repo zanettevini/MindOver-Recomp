@@ -101,6 +101,14 @@ REXCVAR_DEFINE_INT32(net_port, 37373, "CrashMoM", "LAN co-op: the UDP port the h
 REXCVAR_DEFINE_INT32(net_drop_after_s, 30, "CrashMoM",
                      "LAN co-op: a player whose PC stops answering stays in the level (idle) this many "
                      "seconds, then drops out by itself. Nobody is paused meanwhile");
+// A bad network on one PC, for tests (each PC delays / loses what IT sends):
+// how the frame gate and the input delay cope with internet-like links.
+REXCVAR_DEFINE_INT32(debug_net_lag_ms, 0, "CrashMoM",
+                     "Debug (LAN co-op): every packet this PC sends leaves this many ms late");
+REXCVAR_DEFINE_INT32(debug_net_jitter_ms, 0, "CrashMoM",
+                     "Debug (LAN co-op): plus a random 0..N ms more per packet (packets may overtake each other)");
+REXCVAR_DEFINE_INT32(debug_net_loss_percent, 0, "CrashMoM",
+                     "Debug (LAN co-op): this many packets in 100 this PC sends are dropped (0-90)");
 REXCVAR_DEFINE_INT32(net_delay, 3, "CrashMoM",
                      "LAN co-op: input delay in game frames (the host's value counts): a press "
                      "plays this many frames later, so the other PC's packet has time to arrive");
@@ -331,9 +339,83 @@ void Header(Writer& w, Type type) {
   w.U32(type == kHello ? 0 : g_token);
 }
 
+// THE BAD NETWORK (debug_net_lag_ms / _jitter_ms / _loss_percent): packets
+// wait in a queue that their own thread sends when they're due. Its random
+// numbers are its own (never the game's).
+struct LatePacket {
+  std::chrono::steady_clock::time_point due;
+  std::vector<uint8_t> bytes;
+  sockaddr_in to;
+};
+std::mutex g_late_m;
+std::condition_variable g_late_cv;
+std::deque<LatePacket> g_late;
+bool g_late_running = false;  // (detached: a game closing never waits on it)
+std::atomic<bool> g_late_stop{false};
+std::mt19937 g_late_rng{12345};
+uint64_t g_late_sent = 0, g_late_lost = 0;
+
+void LateThread() {
+  std::unique_lock lock(g_late_m);
+  while (!g_late_stop.load()) {
+    if (g_late.empty()) {
+      g_late_cv.wait_for(lock, std::chrono::milliseconds(100));
+      continue;
+    }
+    auto first = std::min_element(g_late.begin(), g_late.end(),
+                                  [](const LatePacket& a, const LatePacket& b) { return a.due < b.due; });
+    const auto now = std::chrono::steady_clock::now();
+    if (first->due > now) {
+      g_late_cv.wait_until(lock, first->due);
+      continue;
+    }
+    LatePacket p = std::move(*first);
+    g_late.erase(first);
+    lock.unlock();
+    if (g_sock != kNoSocket) {
+      sendto(g_sock, (const char*)p.bytes.data(), int(p.bytes.size()), 0, (const sockaddr*)&p.to, sizeof(p.to));
+    }
+    lock.lock();
+  }
+}
+
 void SendTo(const Writer& w, const sockaddr_in& to) {
   if (g_sock == kNoSocket) return;
-  sendto(g_sock, (const char*)w.b.data(), int(w.b.size()), 0, (const sockaddr*)&to, sizeof(to));
+  const int lag = std::max(0, REXCVAR_GET(debug_net_lag_ms)), jitter = std::max(0, REXCVAR_GET(debug_net_jitter_ms));
+  const int loss = std::clamp(REXCVAR_GET(debug_net_loss_percent), 0, 90);
+  if (lag == 0 && jitter == 0 && loss == 0) {
+    sendto(g_sock, (const char*)w.b.data(), int(w.b.size()), 0, (const sockaddr*)&to, sizeof(to));
+    return;
+  }
+  std::lock_guard lock(g_late_m);
+  if (!g_late_running) {
+    g_late_running = true;
+    g_late_stop = false;
+    std::thread(LateThread).detach();
+    REXLOG_WARN("Network: a BAD NETWORK for tests on this PC: what it sends leaves {} ms late (+0..{} ms), "
+                "{}% lost",
+                lag, jitter, loss);
+  }
+  if (loss > 0 && int(g_late_rng() % 100) < loss) {
+    ++g_late_lost;
+    return;
+  }
+  ++g_late_sent;
+  const int extra = jitter > 0 ? int(g_late_rng() % uint32_t(jitter + 1)) : 0;
+  g_late.push_back({std::chrono::steady_clock::now() + std::chrono::milliseconds(lag + extra), w.b, to});
+  g_late_cv.notify_one();
+}
+
+void StopLateThread() {
+  {
+    std::lock_guard lock(g_late_m);
+    if (!g_late_running) return;
+    g_late_running = false;
+    g_late_stop = true;
+    g_late.clear();
+    REXLOG_INFO("Network: the bad network sent {} packets late, dropped {}", g_late_sent, g_late_lost);
+  }
+  g_late_cv.notify_all();
 }
 
 // g_m held.
@@ -690,6 +772,7 @@ void NetworkThread() {
 void CloseSocket() {
   g_stop = true;
   if (g_thread.joinable()) g_thread.join();
+  StopLateThread();
   if (g_sock != kNoSocket) {
 #if defined(_WIN32)
     closesocket(g_sock);
@@ -984,10 +1067,15 @@ void OnPassStart(uint64_t fixed_step_frame) {
   }
   // Every 10 s of session: one line for the log (tests read it).
   if (s > 0 && s % 600 == 0) {
-    REXLOG_INFO("Network: session frame {}: {}, {} frames waited ({:.0f} ms), ping {:.1f} ms", s,
+    std::string bad;
+    {
+      std::lock_guard late(g_late_m);
+      if (g_late_running) bad = fmt::format("; bad network: {} packets sent late, {} dropped", g_late_sent, g_late_lost);
+    }
+    REXLOG_INFO("Network: session frame {}: {}, {} frames waited ({:.0f} ms), ping {:.1f} ms{}", s,
                 g_drift >= 0 ? fmt::format("DRIFTED at frame {}", g_drift)
                              : fmt::format("in sync through frame {}", g_checked),
-                g_waits, g_wait_total, g_ping_ms);
+                g_waits, g_wait_total, g_ping_ms, bad);
   }
   // "Dump both sides": start recording a little before the frame.
   if (g_dump_at >= 0 && !g_dump_started && s >= g_dump_at - 30) {

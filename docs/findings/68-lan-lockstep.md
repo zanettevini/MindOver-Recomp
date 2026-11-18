@@ -545,6 +545,47 @@ first hit each other (both tracks part at that moment). The same change from
 the game's Options menu shows the warning on both PCs on the same frame and
 no drift (as in the hand-played session).
 
+## 6j. A bad network, on one PC
+
+To see how the frame gate and the input delay cope with internet-like links
+without two PCs: `--debug_net_lag_ms=N` (every packet this PC sends leaves N
+ms late), `--debug_net_jitter_ms=N` (plus a random 0..N ms each: packets can
+overtake each other), `--debug_net_loss_percent=N` (N in 100 dropped).
+Packets wait in a queue that their own thread sends; its random numbers are
+its own. The 10 s status line counts them ("bad network: X packets sent
+late, Y dropped"). Both copies got the same settings (so the round trip is
+twice the lag), the 40 s recordings unless said:
+
+| Link (each way) | Ping | Input delay | Result |
+|---|---|---|---|
+| 40 ms + 0..20, 5% lost | ~100 ms | 3 frames (50 ms, the default) | in sync, tracks identical (2 minutes); **43 fps**: 600 frames took 14 s |
+| the same | ~100 ms | 4 (67 ms) | in sync, identical, three times out of three; **53 fps** |
+| the same | ~100 ms | 6 (100 ms) | in sync, identical; **59 fps** (1,200 frames in 20.3 s) |
+| 100 ms + 0..30, 10% lost | ~230 ms | 9 (150 ms) | in sync, identical; **43 fps** |
+| the same | ~230 ms | 12 (200 ms) | in sync, identical; **55 fps** |
+
+Lost and late packets never part the games (each packet carries every input
+the other PC hasn't confirmed yet): a link too slow for the delay only slows
+both games down, because a frame that waited at the gate is never caught up.
+The delay wants to be about half the ping plus the jitter plus a frame or
+two for losses: 6 for a 100 ms ping, 14 or more for 230 ms. Choosing it
+from the measured ping (the plan's M6) is not done: `--net_delay` on the
+host decides.
+
+**A crash, once, not repeated.** In one of these runs (link 40 ms, delay 4)
+the HOST's game stopped at the level's start, ~3 s after "new level" (right
+after "Markers: player 3's own picture in use", a point every run passes):
+`Unhandled guest access violation: read of guest 0x0000001C` in
+`sub_822531E8`, from `sub_8217F808`: the physics set-up of an actor whose
+collision shape wasn't there, the same null read as an actor created without
+its assets (findings/26 s.22, the cheat menu's spawns). The guest's copy had
+gone through the same frames (in sync through frame 327) and played on
+alone. The same settings three more times: no crash, in sync. Over the ~25
+sessions of this section and 6h/6i (50 copies) it happened once; maybe a
+load that finished a frame late on that copy (the helper threads' rules on
+Windows read thread states from snapshots, 6h), maybe not network related.
+Open: it needs a catch with a debugger, or a run of many level starts.
+
 ## 7. Not yet
 
 * Coming back after a disconnect (late join / reconnect: the plan's milestone M5).
