@@ -657,6 +657,9 @@ normal starts after it no frame waited that long. (The test script got
 ## Controls
 
 * `--net_host` (player 1) / `--net_join=<address>` (player 2), `--net_port`
-  (default 37373), `--net_delay` (default 3), `--net_drop_after_s` (default 30). Both turn the fixed step on (60).
+  (default 37373), `--net_delay` (default 3; with `--net_delay_auto`, on by default, the least the host
+  picks from the ping: s.6j), `--net_drop_after_s` (default 30). Both turn the fixed step on (60).
+* Tests: `--debug_net_lag_ms`, `--debug_net_jitter_ms`, `--debug_net_loss_percent` (a bad network on
+  this PC's sends, s.6j).
 * F1 Tools -> **Network (LAN co-op test)**: Host / Join / Leave and the status.
 * Debug console: `net` (status line), `net dump`, `net leave`.
