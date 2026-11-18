@@ -567,15 +567,40 @@ twice the lag), the 40 s recordings unless said:
 Lost and late packets never part the games (each packet carries every input
 the other PC hasn't confirmed yet): a link too slow for the delay only slows
 both games down, because a frame that waited at the gate is never caught up.
-The delay wants to be about half the ping plus the jitter plus a frame or
-two for losses: 6 for a 100 ms ping, 14 or more for 230 ms. Choosing it
-from the measured ping (the plan's M6) is not done: `--net_delay` on the
-host decides. Each PC now names it in the log when its frames waited more
-than a second in a 10 s window (past the session's first 20 s): "the last 10
-s waited 4.3 s for the other PC's input (ping 95 ms, input delay 3 frames):
-both games run slower than 60 fps. An input delay of about 6 on the host
-would fit this link" (half the ping in frames plus 3, at least the delay +
-2; the 100 ms link above, delay 3: it named 6 to 7, where 6 measured 59 fps).
+Why a 100 ms ping needs about 6 frames (100 ms) and not 3: the frame gate
+(s.3) waits for the other PC's input of frame s + (delay - 1) / 2, so each PC
+has only about HALF the delay as room; the delay wants about the whole round
+trip.
+
+**The host now picks the delay from the ping** (`--net_delay_auto`, on by
+default; protocol 5). For the first 4 pings after the guest joins (~2 s) it
+measures, then takes the slowest ping in frames, plus 1, at least
+`--net_delay` (3 by default), and sends it in a new DELAY packet with every
+ping; the guest's session may only start once it has it (else "NO
+SESSION", like a level started before the host's seed: in practice the
+save loads take 10 s or more after the join). A host whose level starts
+before the 4 pings keeps the delay it has. `--net_delay_auto=false` = the
+old fixed delay.
+
+| Link (each way, both PCs) | Ping (slowest of 4) | Delay picked | Result (40 s) |
+|---|---|---|---|
+| none (one PC) | 0.1 ms | 3 (50 ms) | in sync, identical; waited only at the start (the guest's load) |
+| 40 ms + 0..20, 5% lost | 121.5 ms | 8 (133 ms) | in sync, identical; **60 fps** (17 frames waited, 2.1 s, all at the start) |
+| 100 ms + 0..30, 10% lost | 261.8 ms | 17 (283 ms) | in sync, identical; **60 fps** (31 frames waited, 2.2 s, at the start) |
+| 40 ms + 0..20, 5% lost, `--net_delay_auto=false` | | 3 | in sync, identical; 23 s waited (the old way) |
+| none, 5 minutes | | 3 | in sync on every frame, tracks and fingerprint logs identical |
+
+(A first try took half the ping plus 3: 7 frames for the 40 ms link, 10 for
+the 100 ms one; the 100 ms link then still waited 13.5 s in 50 s.)
+
+The price is input lag: 8 frames = 133 ms between a press and its effect on a
+100 ms link, 283 ms on a 230 ms one. Each PC also names a slow link in the
+log when its frames waited more than a second in a 10 s window (past the
+session's first 20 s): "the last 10 s waited 4.3 s for the other PC's input
+(ping 95 ms, input delay 3 frames): both games run slower than 60 fps. An
+input delay of about 8 on the host would fit this link" (the ping in frames
+plus 2, at least the delay + 2): for a link that got worse after the start,
+or with the automatic delay off.
 
 **Spins online, 5 minutes**: new recordings with LB now and then
 (`make_random_play.py ... --lb`, seeds 55 / 66), Simple Spinning and Keep

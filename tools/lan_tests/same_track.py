@@ -16,8 +16,8 @@ def rows(path):
     with open(path) as f:
         lines = [l for l in f if not l.startswith('#')]
     for r in csv.DictReader(lines):
-        if r['replay_frame'] in ('', '-1'):
-            continue
+        if r['replay_frame'] in ('', '-1', None) or r.get('player') is None or None in r.values():
+            continue  # before the replay, or the last line cut off when the game was closed
         out[(int(r['replay_frame']), r['player'])] = {k: v for k, v in r.items() if k != 'frame'}
     return out
 

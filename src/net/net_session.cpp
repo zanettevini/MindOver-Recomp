@@ -33,6 +33,9 @@
 //                            fingerprint count (0-16),
 //                            that many x (i32 frame, u64 fingerprint)
 //   PING / PONG              u64 sender's clock (ns); PONG echoes it
+//   DELAY   (host -> guest)  u8 the session's input delay, final (sent with
+//                            every ping until the session starts: the host
+//                            picks it from the measured ping, net_delay_auto)
 //   BYE                      (nothing): I'm leaving
 //   DUMP                     i32 session frame: dump the world there
 // =============================================================================
@@ -110,6 +113,10 @@ REXCVAR_DEFINE_INT32(debug_net_jitter_ms, 0, "CrashMoM",
                      "Debug (LAN co-op): plus a random 0..N ms more per packet (packets may overtake each other)");
 REXCVAR_DEFINE_INT32(debug_net_loss_percent, 0, "CrashMoM",
                      "Debug (LAN co-op): this many packets in 100 this PC sends are dropped (0-90)");
+REXCVAR_DEFINE_BOOL(net_delay_auto, true, "CrashMoM",
+                    "LAN / online co-op: the host picks the input delay from the ping it measures in the "
+                    "first seconds after the other PC joins (the slowest ping in frames, plus 1; at "
+                    "least net_delay), before the session starts. false = net_delay as it is");
 REXCVAR_DEFINE_INT32(net_delay, 3, "CrashMoM",
                      "LAN co-op: input delay in game frames (the host's value counts): a press "
                      "plays this many frames later, so the other PC's packet has time to arrive");
@@ -122,7 +129,7 @@ using Clock = std::chrono::steady_clock;
 // -----------------------------------------------------------------------------
 // 1. PACKETS
 // -----------------------------------------------------------------------------
-constexpr uint8_t kProtocol = 4;  // 2: inputs carry the sender's camera facing; 3: + its camera pose; 4: + its camera's hold answer  // bump on any layout change: old copies refuse
+constexpr uint8_t kProtocol = 5;  // 2: inputs carry the sender's camera facing; 3: + its camera pose; 4: + its camera's hold answer; 5: DELAY  // bump on any layout change: old copies refuse
 constexpr char kMagic[4] = {'M', 'O', 'R', 'N'};
 enum Type : uint8_t {
   kHello = 1,
@@ -133,6 +140,7 @@ enum Type : uint8_t {
   kPong = 6,
   kBye = 7,
   kDump = 8,
+  kDelay = 9,
 };
 constexpr size_t kHeader = 12;
 constexpr int kMaxInputsPerPacket = 64;  // the most a packet may carry (checked on receipt)
@@ -272,6 +280,13 @@ bool g_welcomed = false;    // handshake done
 uint32_t g_token = 0;       // the session's token (host makes it)
 int g_local = 0, g_remote = 1;
 int g_delay = 3;
+// The input delay is FINAL (host: picked; guest: the host's DELAY received).
+// A guest's session may only start once it is: both PCs must count the same
+// empty frames at the start. Host: the pings measured before it picks.
+bool g_delay_final = false;
+int g_delay_pings = 0;
+double g_delay_ping_max = 0;
+constexpr int kDelayPings = 4;  // 4 pings, every 500 ms: picked ~2 s after the join
 uint32_t g_seed = 0;
 bool g_seed_known = false;
 uint64_t g_peer_settings = 0;
@@ -642,6 +657,30 @@ void HandlePacket(const uint8_t* data, size_t size, const sockaddr_in& from) {
                               Clock::now().time_since_epoch()).count();
       const double ms = double(now - int64_t(t)) / 1e6;
       if (ms >= 0 && ms < 10000) g_ping_ms = g_ping_ms < 0 ? ms : g_ping_ms * 0.8 + ms * 0.2;
+      if (role == Role::kHost && !g_delay_final && ms >= 0 && ms < 10000) {
+        g_delay_ping_max = std::max(g_delay_ping_max, ms);
+        if (++g_delay_pings >= kDelayPings) {
+          // findings/68 s.6j: the frame gate gives each PC about half the
+          // delay as room (s.3: it waits for the other's input of frame s +
+          // (delay - 1) / 2), so the delay wants about the WHOLE round trip:
+          // the slowest ping in frames, plus 1 (100 ms: 6 measured 59 fps).
+          const int fits = int(std::lround(g_delay_ping_max / (1000.0 / 60))) + 1;
+          g_delay = std::clamp(std::max(fits, REXCVAR_GET(net_delay)), 1, 30);
+          g_delay_final = true;
+          Log(fmt::format("input delay {} frames ({:.0f} ms), picked from the ping ({:.1f} ms, the slowest of {})",
+                          g_delay, g_delay * 1000.0 / 60, g_delay_ping_max, g_delay_pings));
+        }
+      }
+      return;
+    }
+    case kDelay: {
+      const int d = r.U8();
+      if (!r.ok || role != Role::kGuest || d < 1 || d > 30 || g_in_session) return;
+      if (!g_delay_final || d != g_delay) {
+        Log(fmt::format("input delay {} frames ({:.0f} ms), the host's pick", d, d * 1000.0 / 60));
+      }
+      g_delay = d;
+      g_delay_final = true;
       return;
     }
     case kBye:
@@ -756,6 +795,14 @@ void NetworkThread() {
       Header(w, kPing);
       w.U64(uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count()));
       SendTo(w, g_peer);
+      // (Also in the session: a guest whose level is still loading may not
+      // have heard it yet; one in its session ignores it.)
+      if (role == Role::kHost && g_delay_final) {
+        Writer d;
+        Header(d, kDelay);
+        d.U8(uint8_t(g_delay));
+        SendTo(d, g_peer);
+      }
       // While waiting at the gate the game thread resends; otherwise keep the
       // peer supplied here too (a lost packet must not stall it).
       SendInputsLocked();
@@ -856,6 +903,9 @@ std::string Host(int port) {
   g_local = 0;
   g_remote = 1;
   g_delay = std::clamp(REXCVAR_GET(net_delay), 1, 30);
+  g_delay_final = !REXCVAR_GET(net_delay_auto);  // auto: picked from the first pings
+  g_delay_pings = 0;
+  g_delay_ping_max = 0;
   g_seed = fixed_step::SessionSeed();  // (M1: the default; a host's own pick later)
   g_seed_known = true;
   g_have_peer = false;
@@ -893,6 +943,7 @@ std::string Join(const std::string& address, int port) {
   g_have_peer = true;
   g_welcomed = false;
   g_seed_known = false;
+  g_delay_final = false;  // the host's DELAY decides
   g_local = 1;
   g_remote = 0;
   g_token = 0;
@@ -996,6 +1047,18 @@ void OnSessionStart(uint64_t fixed_step_frame) {
     g_last_event = "level started before connecting: load again";
     return;
   }
+  if (g_role.load() == Role::kGuest && !g_delay_final) {
+    REXLOG_ERROR("Network: the level started before the host said the input delay: NO SESSION. Load "
+                 "the save again (a second after the Network window says \"connected\")");
+    g_last_event = "level started before the host's input delay: load again";
+    return;
+  }
+  if (g_role.load() == Role::kHost && !g_delay_final) {
+    // Still measuring (a level that started within ~2 s of the join): the
+    // delay as it is now. The guest hears it with the next ping.
+    g_delay_final = true;
+    Log(fmt::format("input delay {} frames: the level started before the ping was measured", g_delay));
+  }
   for (auto& v : g_inputs) v.clear();
   // Frames 0 .. delay-1: nobody can have pressed anything yet (every PC
   // agrees without asking).
@@ -1083,11 +1146,11 @@ void OnPassStart(uint64_t fixed_step_frame) {
     // PC's input more than a second in these 10 s (past the session's first
     // 20 s, when one PC still finishes loading). A wait is never caught up:
     // the game runs slower than 60 for both. Name a delay that would fit
-    // (findings/68 s.6j measured: about half the ping in frames, plus 3).
+    // (findings/68 s.6j measured: about the whole ping in frames, plus 2).
     const double waited = g_wait_total - g_wait_total_at_status;
     g_wait_total_at_status = g_wait_total;
     if (s >= 1200 && waited > 1000) {
-      const int fits = std::min(30, std::max(g_delay + 2, int(std::ceil(g_ping_ms / 2 / (1000.0 / 60))) + 3));
+      const int fits = std::min(30, std::max(g_delay + 2, int(std::lround(g_ping_ms / (1000.0 / 60))) + 2));
       REXLOG_WARN("Network: the last 10 s waited {:.1f} s for the other PC's input (ping {:.0f} ms, input "
                   "delay {} frames): both games run slower than 60 fps. An input delay of about {} on the "
                   "host (--net_delay) would fit this link",
