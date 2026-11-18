@@ -191,6 +191,14 @@ rexglue_setup_target(crash_mom)
 # Linux needs nothing extra.
 if(WIN32)
     target_link_libraries(crash_mom PRIVATE ws2_32)
+    # LOADING ON GAME FRAMES on Windows (src/system/helper_threads.h,
+    # findings/68 s.6h): Windows' linker has no --wrap, so the five wait
+    # imports are defined in the executable itself (wait_imports_win.cpp,
+    # the runtime DLL's originals found at run time) and the threads' states
+    # come from Windows' own calls instead of /proc (thread_states.cpp).
+    target_sources(crash_mom PRIVATE
+        src/system/wait_imports_win.cpp
+        src/system/thread_states.cpp)
 endif()
 
 # -----------------------------------------------------------------------------

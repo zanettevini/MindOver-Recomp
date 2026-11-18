@@ -34,8 +34,10 @@
 // holds still meanwhile); a frame never waits longer than kMaxWait, 30 s
 // (logged).
 //
-// Linux only for now: Windows' linker has no --wrap (no Xbox calls meter
-// there); WaitUntilQuiet then returns at once.
+// Windows (2026-11-18, findings/68 s.6h): Windows' linker has no --wrap (no
+// Xbox calls meter there), so the five waits are defined in the executable
+// itself (system/wait_imports_win.cpp) and the /proc questions are answered
+// by system/thread_states.h.
 // =============================================================================
 #pragma once
 

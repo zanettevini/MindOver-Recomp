@@ -11,15 +11,19 @@
 #include <mutex>
 #include <thread>
 
-// The thread bookkeeping below reads Linux's /proc (thread ids, names, run
-// states). Elsewhere (Windows) nothing calls the wait wrappers yet (they come
-// from the Linux-only Xbox calls meter, CMakeLists.txt), so the slots stay
-// empty and the /proc questions get neutral answers (ThisThreadId & co.):
-// WaitUntilQuiet then returns after one settle time, as helper_threads.h says.
+// The thread bookkeeping below asks the system about threads: ids, names,
+// run states, whether a thread still exists. Linux: /proc. Windows: the
+// same questions answered by system/thread_states.h (findings/68 s.6h),
+// with the wait wrappers from system/wait_imports_win.cpp (Linux gets them
+// from the Xbox calls meter's --wrap, CMakeLists.txt). Anything else: no
+// wrappers, neutral answers, WaitUntilQuiet returns after one settle time.
 #if defined(__linux__)
 #include <dirent.h>
 #include <pthread.h>
 #include <unistd.h>
+#elif defined(_WIN32)
+#include <vector>
+#include "system/thread_states.h"
 #endif
 
 #include <cstdio>
@@ -57,6 +61,8 @@ using Clock = std::chrono::steady_clock;
 int ThisThreadId() {
 #if defined(__linux__)
   return int(gettid());
+#elif defined(_WIN32)
+  return int(thread_states::CurrentId());
 #else
   return 0;
 #endif
@@ -66,6 +72,8 @@ int ThisThreadId() {
 void ThisThreadName(char* out, size_t size) {
 #if defined(__linux__)
   pthread_getname_np(pthread_self(), out, size);
+#elif defined(_WIN32)
+  thread_states::CurrentName(out, size);
 #else
   if (size) out[0] = 0;
 #endif
@@ -120,7 +128,18 @@ std::atomic<int> g_main_tid{0};  // set when the main thread closes the gate
 
 // Is the main thread asleep (state S/D in /proc), not running or ready?
 bool MainThreadAsleep() {
-#if !defined(__linux__)
+#if defined(_WIN32)
+  // Windows: the main thread's state in a snapshot of this process's threads
+  // (Waiting = Linux's S / D).
+  const int tid = g_main_tid.load();
+  if (tid <= 0) return false;
+  thread_local std::vector<thread_states::Thread> threads;
+  if (!thread_states::Snapshot(threads)) return false;
+  for (const auto& t : threads) {
+    if (int(t.id) == tid) return t.run == thread_states::Run::kWaiting;
+  }
+  return false;
+#elif !defined(__linux__)
   return false;
 #else
   const int tid = g_main_tid.load();
@@ -185,7 +204,37 @@ Slot* MySlot() {
 // Game threads = the guest thread names: "XThread...", "audio::...",
 // "ClipLoadThread"; the port's own and the SDK's host threads aren't.
 bool GameThreadRunnable() {
-#if !defined(__linux__)
+#if defined(_WIN32)
+  // Windows: the same rule as the Linux code below, on a snapshot of this
+  // process's threads (thread_states.h): a GAME thread (named "XThread...",
+  // "audio::...", "ClipLoad...") or a tracked helper that is running or ready
+  // to run means the frame may not start yet.
+  thread_local std::vector<thread_states::Thread> threads;
+  if (!thread_states::Snapshot(threads)) return false;
+  const int self = ThisThreadId();
+  const int n = std::min(g_next_slot.load(), kSlots);
+  for (const auto& t : threads) {
+    const int tid = int(t.id);
+    if (tid <= 0 || tid == self || t.run != thread_states::Run::kRunnable) continue;
+    bool tracked = false, helper = false;
+    for (int i = 0; i < n && !tracked; ++i) {
+      if (g_slots[i].tid.load() == tid) {
+        tracked = true;
+        helper = g_slots[i].used.load();
+      }
+    }
+    if (tracked && !helper) continue;  // the port's own threads, main
+    if (helper) return true;
+    char comm[32] = {};
+    thread_states::NameOf(t.id, comm, sizeof(comm));
+    const std::string_view name(comm);
+    if (name.substr(0, 7) == "XThread" || name.substr(0, 7) == "audio::" ||
+        name.substr(0, 8) == "ClipLoad") {
+      return true;
+    }
+  }
+  return false;
+#elif !defined(__linux__)
   return false;
 #else
   DIR* dir = opendir("/proc/self/task");
@@ -242,7 +291,15 @@ bool GameThreadRunnable() {
 
 // Has this tracked thread ended (no /proc/self/task/<tid> any more)?
 bool Ended(const Slot& s) {
-#if !defined(__linux__)
+#if defined(_WIN32)
+  // Windows: gone from this process's threads, or terminated.
+  thread_local std::vector<thread_states::Thread> threads;
+  if (!thread_states::Snapshot(threads)) return false;
+  for (const auto& t : threads) {
+    if (int(t.id) == s.tid.load()) return t.run == thread_states::Run::kEnded;
+  }
+  return true;
+#elif !defined(__linux__)
   (void)s;
   return false;
 #else
