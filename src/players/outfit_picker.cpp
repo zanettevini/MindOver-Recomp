@@ -105,6 +105,8 @@
 #include <fmt/format.h>
 #include <rex/cvar.h>
 #include "../input/native_controllers.h"
+#include "../game_time.h"
+#include "../net/net_session.h"
 #include <rex/logging.h>
 #include <rex/ppc/func.h>
 #include <rex/runtime.h>
@@ -597,7 +599,10 @@ void Step(Pick& k, int row, int d) {
 }
 
 // --- The picker's state (game main thread) -----------------------------------
-using Clock = std::chrono::steady_clock;
+// Game time (game_time.h): the same as the steady clock in normal play; in an
+// online session (fixed step on) the key repeats, the "just closed" second and
+// the queue's wait fall on the same frames on both PCs.
+using Clock = game_time::Clock;
 struct Player {
   bool joined = false;
   Pick pick;
@@ -711,6 +716,18 @@ struct Pad {
 };
 Pad ReadPad(int p) {
   Pad pad;
+  // ONLINE (net/net_session.h): every PC plays the picker with the session's
+  // controller states (both PCs have the same ones), never with this PC's own
+  // devices: on the guest, socket 1 is the HOST's player.
+  if (net::Configured()) {
+    uint8_t g12[12];
+    if (net::FrameInput(p, g12)) {
+      pad.buttons = uint16_t(g12[0] << 8 | g12[1]);
+      pad.x = float(int16_t(uint16_t(g12[4] << 8 | g12[5]))) / 32767.0f;
+      pad.y = float(int16_t(uint16_t(g12[6] << 8 | g12[7]))) / 32767.0f;
+    }
+    return pad;
+  }
   rex::input::X_INPUT_STATE state{};
   if (native_controllers::Read(uint32_t(p), &state) == 0) {
     pad.buttons = uint16_t(state.gamepad.buttons);
@@ -1672,7 +1689,8 @@ void Mouse(PPCContext& ctx, uint8_t* base) {
   g.mouse_player = -1;
   const auto* assignment = kbm::PlayerAssignment::Get();
   auto* driver = kbm::KeyboardMouseDriver::Get();
-  if (!driver || !assignment) return;
+  // Online the mouse plays nobody here: its clicks would reach only this PC.
+  if (!driver || !assignment || net::Configured()) return;
   for (int p = 0; p < kMaxPlayers; ++p) {
     if (g.players[p].joined && assignment->KeyboardAnswersFor(uint32_t(p))) {
       g.mouse_player = p;

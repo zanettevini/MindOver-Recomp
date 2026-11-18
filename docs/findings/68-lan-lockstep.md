@@ -471,6 +471,61 @@ Not covered yet: two PCs, a level change and a cutscene with the wrappers on
 Windows, Linux with this branch's `thread_states`-free path (unchanged
 code there).
 
+## 6i. Played by hand (one PC, two copies): the Spin key
+
+`tools/lan_tests/play_one_pc.ps1` opens both copies in windows (host = player
+1 with sound, guest = player 2) on the newest save, for a person to play;
+when both windows close, the session's log lines go to a report. The first
+session played by hand (save 17, one person on the keyboard and a
+controller, 8 minutes: fights, the pause menu, Options changed twice)
+stayed in sync for 28,830 frames, then **DRIFTED at session frame 28831**,
+20 s after Simple Spinning had been turned on in Options (on both copies, on
+the same frame: the menu runs on the shared input). The input recordings of
+the two copies (`game-inputs.txt`, what the game read per player) are the
+same line for line: the controller states were alike, so something outside
+them decided.
+
+The likely cause (the hand-played session can't be replayed frame for frame: its recordings are stamped in real milliseconds): **the keyboard's Spin key**. With Simple Spinning on, the key
+answers the fight trees' "a full circle of the stick done?"
+(`sub_8221E200`, `input/keyboard_mouse.cpp`) straight from this PC's
+keyboard driver, not through the controller state; `game_mods::FilterPad`
+also read the key's "held" for Keep Spinning. In a session that answer
+reaches only the copy whose window has the keyboard. Reproduced with the
+console's `key Q` (the default Spin key) on the host only, save 17,
+`--simple_spinning=true` on both:
+
+| Run | Result |
+|---|---|
+| before the fix | "a full circle for player 1 (the Spin key)" in the HOST's log only; **DRIFTED at session frame 572**, a second after the second press |
+| (the same on save 10, player 1 riding a titan) | in sync: the titan's state didn't take the circle there, so the presses changed nothing |
+| after the fix | "a full circle for player 1 (simple spinning's button)" in BOTH logs on the same frame; in sync on every frame (1,394), tracks identical |
+
+**The fix**: online (`net::Configured()`), the Spin key goes into the
+controller state as LB, Simple Spinning's own button (`MergeInto`, only in
+play, with Simple Spinning on), so it travels with the player's input and
+`game_mods::FilterPad` turns it into circles on both PCs on the same frames
+(its clock is already game time). The keyboard's own circles and its "held"
+are not asked in a session. Off line nothing changes.
+
+The same kind of thing, found while looking (not seen in a session yet; the
+port's own code reading THIS PC's devices or mouse where the world listens):
+
+* the chest's outfit picker read each player's controller and the keyboard
+  itself (`players/outfit_picker.cpp` `ReadPad`), and its key repeat, its
+  "just closed" second and its queue's wait used the real clock: online it
+  now reads the session's input (`net::FrameInput`), the clock is game time,
+  and the mouse plays no card;
+* the save list's buttons (`saves/save_library.cpp` `MenuButtonsDown`):
+  the session's input online;
+* the mouse wheel in lists (the save list, the achievements):
+  `TakeListWheel` gives nothing online, like the clicks (6d).
+
+Built with all of these, the earlier sessions again: the 5-minute session in
+sync on every frame (the fourth time; the same end, player 1 74.9 and player
+2 58.1 at the same places), the 40 s session in sync (the same end, titan
+25.6, player 2 152.0), the Spin key test in sync. The chest and the save list
+online are not played yet: their changes are reasoned, not tested.
+
 ## 7. Not yet
 
 * Coming back after a disconnect (late join / reconnect: the plan's milestone M5).

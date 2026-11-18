@@ -873,6 +873,13 @@ uint16_t MenuButtonsDown(PPCContext& ctx, uint8_t* base, uint16_t mask) {
     if (owner >= 0 ? p != owner : !menu_input::PlayerPlays(p)) {
       continue;
     }
+    // ONLINE (net/net_session.h): the session's controller states, the same
+    // on both PCs; this PC's own devices would steer only its own copy.
+    if (net::Configured()) {
+      uint8_t g12[12];
+      if (net::FrameInput(p, g12)) down |= uint16_t(g12[0] << 8 | g12[1]) & mask;
+      continue;
+    }
     rex::input::X_INPUT_STATE state{};
     native_controllers::Read(uint32_t(p), &state);
     down |= uint16_t(state.gamepad.buttons) & mask;

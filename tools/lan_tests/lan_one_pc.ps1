@@ -16,6 +16,8 @@ param(
   [int]$DropAfterS = 30,       # --net_drop_after_s on both
   [int]$ToMs = -1,             # replay only up to this ms of the recordings (-1 = all)
   [switch]$FpLog,              # --debug_net_fingerprint_log on both (per-frame fingerprint parts)
+  [string]$GameArgs = '',      # more game flags for both copies, separated by spaces (e.g. --simple_spinning=true)
+  [string]$HostExtra = '',     # more console commands for the host after `track`, separated by ';' (e.g. wait ms 12000;key Q 400)
   [string]$Python = 'python'   # a Python 3 on PATH, or its full path
 )
 $ErrorActionPreference = 'Stop'
@@ -42,6 +44,7 @@ function Start-Copy($name, $port, $netArgs) {
     "--game_data_root=`"$(Join-Path $install 'game')`"", "--user_data_root=`"$(Join-Path $dir 'saves')`"",
     "--cache_root=`"$cache`"", "--controls_file=`"$(Join-Path $dir 'controls.toml')`"",
     "--log_file=`"$(Join-Path $dir 'game.log')`"") + $netArgs
+  if ($GameArgs) { $args += $GameArgs.Split(' ', [StringSplitOptions]::RemoveEmptyEntries) }
   if ($FpLog) { $args += "--debug_net_fingerprint_log=`"$(Join-Path $dir 'fingerprint.txt')`"" }
   $p = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory (Split-Path $exe) -PassThru
   "$name started: pid $($p.Id), console tcp:$port, $($netArgs -join ' ')" | Add-Content $report
@@ -55,7 +58,7 @@ function Start-Driver($name, $port, $recording) {
   $csv = "..\..\..\..\source\mp_tests\runs\$Tag\$name\track.csv"
   $rep = "..\..\..\..\source\mp_tests\$recording"
   $cmds = @('-I', "`"$mom`"", '-s', "tcp:$port", '--wait-socket', '600', 'state', '"wait ms 8000"', 'clock', 'net',
-            $(if ($ToMs -gt 0) { "`"replay $rep 0 $ToMs onspawn`"" } else { "`"replay $rep onspawn`"" }), "`"track $csv $Frames`"", '"wait replay 900000"',
+            $(if ($ToMs -gt 0) { "`"replay $rep 0 $ToMs onspawn`"" } else { "`"replay $rep onspawn`"" }), "`"track $csv $Frames`"") + $(if ($name -eq 'host' -and $HostExtra) { $HostExtra.Split(';') | ForEach-Object { "`"$_`"" } } else { @() }) + @('"wait replay 900000"',
             '"wait ms 4000"', 'track', 'net', 'players')
   $d = Start-Process -FilePath $python -ArgumentList $cmds -NoNewWindow -PassThru `
     -RedirectStandardOutput (Join-Path $dir 'console.txt') -RedirectStandardError (Join-Path $dir 'console-errors.txt')
@@ -86,7 +89,7 @@ foreach ($n in @('host', 'guest')) {
   "--- ${n}: net status at the end" | Add-Content $report
   Get-Content (Join-Path $runs "$n\console.txt") | Select-String -Pattern 'net|session|drift|sync|DRIFT' | ForEach-Object { $_.Line } | Add-Content $report
   "--- ${n}: log lines about the session" | Add-Content $report
-  Get-Content (Join-Path $runs "$n\game.log") | Select-String -Pattern 'Network:|DRIFT|Co-op: states|Co-op: controller|drops out|Drop' | Select-Object -First 40 | ForEach-Object { $_.Line } | Add-Content $report
+  Get-Content (Join-Path $runs "$n\game.log") | Select-String -Pattern 'Network:|DRIFT|Co-op: states|Co-op: controller|drops out|Drop|KBM: Spin' | Select-Object -First 60 | ForEach-Object { $_.Line } | Add-Content $report
 }
 if ($FpLog) {
   "--- fingerprint logs: first difference" | Add-Content $report

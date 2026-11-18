@@ -10,6 +10,7 @@
 #include "players.h"
 #include "../players/more_players.h"
 #include "../gameplay/game_mods.h"
+#include "../net/net_session.h"
 #include "../guest_memory.h"
 
 #include <algorithm>
@@ -22,6 +23,8 @@
 #include <rex/ui/ui_event.h>
 #include <rex/ui/virtual_key.h>
 #include <rex/ui/windowed_app_context.h>
+
+REXCVAR_DECLARE(bool, simple_spinning);  // gameplay/game_mods.cpp (MergeInto, online)
 
 REXCVAR_DEFINE_BOOL(keyboard_mouse, true, "CrashMoM",
                     "Play with keyboard and mouse (keys in user/controls.toml in the game folder, F1 Tools -> Controls = "
@@ -691,6 +694,17 @@ void KeyboardMouseDriver::MergeInto(uint8_t* gamepad) {
     last_pad_ = pad;
   }
 
+  // ONLINE (net/net_session.h): the Spin key travels as LB, simple spinning's
+  // button. Off line it answers the fight trees' "a full circle done?" itself
+  // (sub_8221E200 below), from this PC's keyboard: in a session that answer
+  // would reach only THIS PC's game (seen: a drift a few seconds after
+  // simple spinning was turned on, in a session played by hand). As LB it is
+  // part of the controller state both PCs get, and game_mods::FilterPad
+  // turns it into circles on both, on the same frames.
+  if (!paused && spin_held_ && net::Configured() && REXCVAR_GET(simple_spinning) && more_players::InPlay()) {
+    pad.buttons = uint16_t(uint16_t(pad.buttons) | X_INPUT_GAMEPAD_LEFT_SHOULDER);
+  }
+
   // Into the game's state (guest X_INPUT_GAMEPAD, big-endian), like devices
   // on one player are merged: buttons together, the bigger trigger, and a
   // stick the keys push replaces the controller's.
@@ -818,6 +832,10 @@ int KeyboardMouseDriver::TakeListWheel() {
   std::lock_guard<std::mutex> lock(mutex_);
   const int notches = list_wheel_;
   list_wheel_ = 0;
+  // Online the wheel scrolls no list (the save list, the achievements): it is
+  // this PC's mouse, not part of the input both PCs share (like the clicks,
+  // input/mouse_menus.cpp FrontEndFrame).
+  if (net::Configured()) return 0;
   return notches;
 }
 
@@ -963,7 +981,10 @@ extern "C" REX_FUNC(sub_8221E200) {
   if (game_mods::Holding(player)) return;
   kbm::KeyboardMouseDriver* driver = kbm::KeyboardMouseDriver::Get();
   kbm::PlayerAssignment* assignment = kbm::PlayerAssignment::Get();
-  const bool keyboard = driver && assignment && assignment->KeyboardAnswersFor(uint32_t(player));
+  // Online the Spin key comes as LB through the controller state (MergeInto):
+  // the keyboard's own circles stay out of the world.
+  const bool keyboard =
+      !net::Configured() && driver && assignment && assignment->KeyboardAnswersFor(uint32_t(player));
   // Our circles (the keyboard's Spin key, simple spinning's LB) obey the
   // game's own lock, like the stick's: no spins in cutscenes.
   if (keyboard && !REXCVAR_GET(simple_spinning)) driver->TakeSpinCircle();  // off: dropped
