@@ -52,7 +52,9 @@
 //   track <file> [frames] | track stop | track
 //                            every game frame, every player: position,
 //                            velocity, ground contact -> CSV, for
-//                            tools/compare_runs.py
+//                            tools/compare_runs.py; plus a "player 0" row
+//                            per frame fingerprinting every other damageable
+//                            character (count, sums, hash: findings/68 s.6)
 //   xbox                     the Xbox calls meter: every Xbox service the game
 //                            called so far, counts + calling functions
 //                            (debug/xbox_calls.h)

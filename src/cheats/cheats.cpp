@@ -720,6 +720,11 @@ void Tick(PPCContext& ctx, uint8_t* base) {
 
 }  // namespace
 
+// (cheats.h) The damageables seen last frame, for the debug console's `track`.
+void ForEachDamageable(const std::function<void(uint32_t, uint32_t)>& fn) {
+  for (const auto& [actor, damageable] : g_damageable_of) fn(actor, damageable);
+}
+
 // --- API ----------------------------------------------------------------------
 
 Snapshot GetSnapshot() {

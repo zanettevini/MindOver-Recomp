@@ -980,6 +980,53 @@ void TrackFrame(void* user) {
                  pos[2], vel[0], vel[1], vel[2], ground, steep, drawn[0], drawn[1], drawn[2]);
     ++t.rows;
   }
+  // THE WORLD (findings/68 s.6), one row with player 0: every OTHER damageable
+  // character the game updated last frame (enemies, titans, breakables with
+  // health; cheats.h ForEachDamageable), in address order. body = how many;
+  // x y z = the sum of their positions, vx = the sum of their hitpoints (for
+  // reading); ground : steep = a 64-bit FNV-1a hash of each one's address,
+  // exact position bits and hitpoint bits (for comparing: two runs of the
+  // same replay must give the same hash on every frame).
+  uint64_t hash = 1469598103934665603ull;
+  auto mix = [&hash](uint32_t word) {
+    for (int b = 0; b < 4; ++b) {
+      hash ^= (word >> (8 * b)) & 0xFF;
+      hash *= 1099511628211ull;
+    }
+  };
+  uint32_t count = 0;
+  double sum[3] = {}, hitpoints = 0.0;
+  cheats::ForEachDamageable([&](uint32_t actor, uint32_t damageable) {
+    try {
+      bool player = false;
+      for (int p = 0; p < 4; ++p) {
+        player = player || actor == more_players::CharacterOfPlayer(p) ||
+                 actor == more_players::TitanOfPlayer(p);
+      }
+      if (player) return;
+      const uint32_t m = ReadBE(actor + 44, 4);
+      mix(actor);
+      for (int i = 0; i < 3; ++i) {
+        const uint32_t bits = ReadBE(m + 48 + 4 * i, 4);
+        mix(bits);
+        float f;
+        std::memcpy(&f, &bits, 4);
+        sum[i] += f;
+      }
+      const uint32_t hp_bits = ReadBE(ReadBE(damageable + 64, 4), 4);  // +64 -> hitpoints
+      mix(hp_bits);
+      float hp;
+      std::memcpy(&hp, &hp_bits, 4);
+      hitpoints += hp;
+      ++count;
+    } catch (const Error&) {
+      mix(0xDEADu);  // unreadable this frame: still part of the fingerprint
+    }
+  });
+  std::fprintf(t.file, "%lld,%lld,%.3f,0,%08X,%.5f,%.5f,%.5f,%.5f,0,0,%08X,%08X,0,0,0\n",
+               (long long)frame, (long long)replay_frame, t_ms, count, sum[0], sum[1], sum[2],
+               hitpoints, uint32_t(hash >> 32), uint32_t(hash));
+  ++t.rows;
 }
 
 std::string StopTrack() {

@@ -82,6 +82,8 @@
 // =============================================================================
 #pragma once
 
+#include <functional>
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -188,6 +190,12 @@ void NoteProgressCheat();  // (the same; kept for spawn.cpp)
 void OnGameStarted(bool from_marked_save, int save_number);
 // The PC save drive wrote the game's save with the mark (or not).
 void OnSaveWritten(bool marked);
+
+// Every damageable character the game updated last frame (players, enemies,
+// titans, breakables with health): actor -> its CDamageableBehaviour, in
+// address order. Game thread only (the debug console's `track` reads it at
+// the end of a frame to fingerprint the world, findings/68 s.6).
+void ForEachDamageable(const std::function<void(uint32_t actor, uint32_t damageable)>& fn);
 
 // Debug FIFO (debug_input_script.h): "cheat <command>" for test runs without
 // clicking the menu. Commands: god on|off, onehit on|off (enemies die in one hit), freeze on|off, step, speed <x>,
