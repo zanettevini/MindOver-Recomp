@@ -279,6 +279,12 @@ std::vector<PadIn> g_inputs[kPlayers];  // [player][session frame]
 int64_t g_peer_has_mine = -1;           // newest of MY frames the peer holds without a gap
 std::map<int64_t, uint64_t> g_fp_local, g_fp_remote;
 int64_t g_checked = -1, g_drift = -1;
+// The world settings (system/session_settings.h) when the session began, and
+// as last seen: one that changes inside the session is named in the log (it
+// must change on both PCs on the same frame: the game's Options menu does,
+// it runs on the shared input; the F1 tools and the console change only
+// THIS PC, and the games part).
+uint64_t g_settings_seen = 0;
 int64_t g_waits = 0;
 double g_wait_total = 0, g_wait_last = 0;
 std::atomic<bool> g_waiting{false};
@@ -912,6 +918,7 @@ void OnSessionStart(uint64_t fixed_step_frame) {
   g_fp_local.clear();
   g_fp_remote.clear();
   g_checked = g_drift = -1;
+  g_settings_seen = session_settings::Fingerprint();
   g_base = int64_t(fixed_step_frame) + 1;  // the NEXT pass is session frame 0
   g_last_sent = g_delay - 1;
   g_latest_local = PadIn{};
@@ -963,6 +970,18 @@ void OnPassStart(uint64_t fixed_step_frame) {
   g_last_sent = int64_t(mine.size()) - 1;
   CompareLocked();
   SendInputsLocked();
+  // Once a second: did a world setting change on this PC?
+  if (s > 0 && s % 60 == 0) {
+    const uint64_t settings = session_settings::Fingerprint();
+    if (settings != g_settings_seen) {
+      REXLOG_WARN("Network: a WORLD SETTING changed on this PC at session frame {} (fingerprint {:016X} -> "
+                  "{:016X}). Fine from the game's Options menu (both PCs change it on the same frame); "
+                  "from the F1 tools or the console only this PC changes and the games part. Console "
+                  "`settings` lists them",
+                  s, g_settings_seen, settings);
+      g_settings_seen = settings;
+    }
+  }
   // Every 10 s of session: one line for the log (tests read it).
   if (s > 0 && s % 600 == 0) {
     REXLOG_INFO("Network: session frame {}: {}, {} frames waited ({:.0f} ms), ping {:.1f} ms", s,

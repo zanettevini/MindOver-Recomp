@@ -526,6 +526,25 @@ sync on every frame (the fourth time; the same end, player 1 74.9 and player
 25.6, player 2 152.0), the Spin key test in sync. The chest and the save list
 online are not played yet: their changes are reasoned, not tested.
 
+**15 minutes** (new recordings from `tools/lan_tests/make_random_play.py`,
+seeds 33 and 44: runs, jumps, light / heavy attacks, B for both players):
+in sync on every frame through session frame 53,400 (14.8 min), both
+players' tracks identical on all 52,998 replay frames, 60.0 fps over the
+last 5 s windows (59.7 average over the session with its start).
+
+**A world setting changed inside a session** (the hand-played session
+changed two in Options, alike on both PCs). The settings are compared once,
+at connect (s.6, `session_settings`); one changed later through the F1 tools
+or the console changes only that PC. Now each PC checks its settings'
+fingerprint once a second in a session and names a change in the log
+("a WORLD SETTING changed on this PC at session frame N", with the old and
+new fingerprints; console `settings` lists them). Test: the host alone set
+`friendly_fire` off through the console 7 s in: the warning on the host only,
+at session frame 420; the session DRIFTED at frame 1944, when the players
+first hit each other (both tracks part at that moment). The same change from
+the game's Options menu shows the warning on both PCs on the same frame and
+no drift (as in the hand-played session).
+
 ## 7. Not yet
 
 * Coming back after a disconnect (late join / reconnect: the plan's milestone M5).
