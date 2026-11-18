@@ -417,6 +417,44 @@ most 20 inputs (about 1.3 KB). The zone rule has a cost:
 a zone that only the camera looks into, with no player in it, stands still
 until a player walks in.
 
+## 6h. Windows: the first runs (one PC, two copies)
+
+Built on Windows 11 with the project's Clang (23) and Visual Studio's
+libraries. Two changes were needed to build: `system/helper_threads.cpp`
+read Linux's `/proc` (its thread questions now answer neutrally elsewhere,
+see the file's header), and the session's socket code needs `ws2_32`. The
+debug console listens on `tcp:<port>` (127.0.0.1 only) so the tests can drive
+both copies on Windows. Test tools: `tools/lan_tests/`.
+
+| Test (save with a titan and enemies, two copies on 127.0.0.1) | Result |
+|---|---|
+| 40 s: player 1 circles; player 2 joins with START (mask), B (on foot), circles | connected, same settings, the session started on the same frame with the same seed; player 2 joined on both; in sync on every frame (3,043); both players' tracks identical; the same hitpoints at the end on both (titan 25.6, player 2 152.0) |
+| 5 minutes of seeded random play, both players | **DRIFTED at session frame 1748** (29 s): the two copies parted for good |
+| the same recordings, the guest's game killed after 60 s, `--net_drop_after_s=5` | in sync through frame 2731 (past 1748); the host played on without a pause; "player 2's PC stopped answering", player 2 dropped out 5 s later through the game's own Drop Out |
+| the same recordings, 2 minutes, three times, fingerprint logs on | in sync on every frame, three times out of three (7,812 frames each) |
+
+So one run in five parted, at a frame the other runs went through in sync:
+on Windows the lockstep is not yet repeatable every time. The likely cause
+is what `helper_threads.h` already names as Linux-only: the game's helper
+threads (loading, audio streaming) are not held to game frames on Windows,
+because the wait wrappers come from the Linux-only Xbox calls meter
+(`--wrap`). In the drifting run the two copies' logs show the same audio
+files loaded a few milliseconds apart, and the renderer's vertex byte
+counts already differ before the drift (1,242,296 against 1,243,304 at game
+frame 1800): something the fingerprint doesn't cover parted earlier. Not
+proven: the fingerprint logs were off in that run.
+
+**A way to give Windows the wait wrappers**, not tried yet: the runtime
+library is a DLL that exports every `__imp__<Name>` (`rexruntime`,
+`WINDOWS_EXPORT_ALL_SYMBOLS`), and the generated code calls them by name
+through the import library. A definition of `__imp__KeWaitForSingleObject`
+and the four other waits in the game's own executable would be used instead
+of the import (the import library only fills symbols nothing else defines),
+and the original is still reachable with `GetProcAddress` on the runtime
+DLL. The `/proc` questions have Windows answers too: a thread's run state
+and wait state from `NtQuerySystemInformation` (SystemProcessInformation),
+its name from `GetThreadDescription`, its end from `GetExitCodeThread`.
+
 ## 7. Not yet
 
 * Coming back after a disconnect (late join / reconnect: the plan's milestone M5).
