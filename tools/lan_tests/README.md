@@ -12,6 +12,7 @@ player 1, the guest player 2, each one's own player driven by a recording
 | `same_track.py` | two `track` files identical row by row? |
 | `fp_first_diff.py` | the first frame where two fingerprint logs differ |
 | `lan_host.txt`, `lan_guest.txt` | 40 s: the host runs circles; the guest presses START at 3 s (joins as the mask), B at 5 s (on foot), then circles the other way |
+| `lb_host_5min.txt`, `lb_guest_5min.txt` | 5 minutes with LB too (seeds 55 / 66), for `-GameArgs "--simple_spinning=true --keep_spinning=true"` |
 | `lan_host_15min.txt`, `lan_guest_15min.txt` | 15 minutes the same way (seeds 33 / 44; `-Frames 55500`) |
 | `lan_host_5min.txt`, `lan_guest_5min.txt` | 5 minutes of seeded random play (runs, jumps, light / heavy attacks, B), the guest joining the same way |
 

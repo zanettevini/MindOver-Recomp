@@ -51,6 +51,7 @@ std::string BehaviourParts();
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
@@ -295,6 +296,7 @@ int64_t g_checked = -1, g_drift = -1;
 uint64_t g_settings_seen = 0;
 int64_t g_waits = 0;
 double g_wait_total = 0, g_wait_last = 0;
+double g_wait_total_at_status = 0;  // g_wait_total at the last 10 s status line
 std::atomic<bool> g_waiting{false};
 int64_t g_dump_at = -1;  // session frame both PCs dump the world at
 bool g_dump_started = false;
@@ -816,6 +818,7 @@ void ResetSessionLocked() {
   g_checked = g_drift = -1;
   g_waits = 0;
   g_wait_total = g_wait_last = 0;
+  g_wait_total_at_status = 0;
   g_dump_at = -1;
   g_in_session = false;
   g_ping_ms = -1;
@@ -1076,6 +1079,20 @@ void OnPassStart(uint64_t fixed_step_frame) {
                 g_drift >= 0 ? fmt::format("DRIFTED at frame {}", g_drift)
                              : fmt::format("in sync through frame {}", g_checked),
                 g_waits, g_wait_total, g_ping_ms, bad);
+    // A link too slow for the input delay: the frames waited for the other
+    // PC's input more than a second in these 10 s (past the session's first
+    // 20 s, when one PC still finishes loading). A wait is never caught up:
+    // the game runs slower than 60 for both. Name a delay that would fit
+    // (findings/68 s.6j measured: about half the ping in frames, plus 3).
+    const double waited = g_wait_total - g_wait_total_at_status;
+    g_wait_total_at_status = g_wait_total;
+    if (s >= 1200 && waited > 1000) {
+      const int fits = std::min(30, std::max(g_delay + 2, int(std::ceil(g_ping_ms / 2 / (1000.0 / 60))) + 3));
+      REXLOG_WARN("Network: the last 10 s waited {:.1f} s for the other PC's input (ping {:.0f} ms, input "
+                  "delay {} frames): both games run slower than 60 fps. An input delay of about {} on the "
+                  "host (--net_delay) would fit this link",
+                  waited / 1000, g_ping_ms, g_delay, fits);
+    }
   }
   // "Dump both sides": start recording a little before the frame.
   if (g_dump_at >= 0 && !g_dump_started && s >= g_dump_at - 30) {

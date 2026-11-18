@@ -570,7 +570,18 @@ both games down, because a frame that waited at the gate is never caught up.
 The delay wants to be about half the ping plus the jitter plus a frame or
 two for losses: 6 for a 100 ms ping, 14 or more for 230 ms. Choosing it
 from the measured ping (the plan's M6) is not done: `--net_delay` on the
-host decides.
+host decides. Each PC now names it in the log when its frames waited more
+than a second in a 10 s window (past the session's first 20 s): "the last 10
+s waited 4.3 s for the other PC's input (ping 95 ms, input delay 3 frames):
+both games run slower than 60 fps. An input delay of about 6 on the host
+would fit this link" (half the ping in frames plus 3, at least the delay +
+2; the 100 ms link above, delay 3: it named 6 to 7, where 6 measured 59 fps).
+
+**Spins online, 5 minutes**: new recordings with LB now and then
+(`make_random_play.py ... --lb`, seeds 55 / 66), Simple Spinning and Keep
+Spinning on in both copies: save 17 (another level, a cutscene at its
+start) and save 10 both in sync on every frame (18,800+), both players'
+tracks identical on all 18,039 replay frames, the fingerprint logs equal.
 
 **A crash, once, not repeated.** In one of these runs (link 40 ms, delay 4)
 the HOST's game stopped at the level's start, ~3 s after "new level" (right
