@@ -185,6 +185,12 @@ endif()
 # Links the generated code + runtime, adds the codegen dependency.
 rexglue_setup_target(crash_mom)
 
+# Windows sockets (Winsock 2) for the LAN co-op session (src/net/net_session.cpp:
+# its socket code has a Windows branch). Linux needs nothing extra.
+if(WIN32)
+    target_link_libraries(crash_mom PRIVATE ws2_32)
+endif()
+
 # -----------------------------------------------------------------------------
 # The Xbox calls meter (src/debug/xbox_calls.h), Linux only
 # -----------------------------------------------------------------------------

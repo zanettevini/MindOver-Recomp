@@ -11,9 +11,16 @@
 #include <mutex>
 #include <thread>
 
+// The thread bookkeeping below reads Linux's /proc (thread ids, names, run
+// states). Elsewhere (Windows) nothing calls the wait wrappers yet (they come
+// from the Linux-only Xbox calls meter, CMakeLists.txt), so the slots stay
+// empty and the /proc questions get neutral answers (ThisThreadId & co.):
+// WaitUntilQuiet then returns after one settle time, as helper_threads.h says.
+#if defined(__linux__)
 #include <dirent.h>
 #include <pthread.h>
 #include <unistd.h>
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -45,6 +52,24 @@ namespace helper_threads {
 namespace {
 
 using Clock = std::chrono::steady_clock;
+
+// Linux thread id of the calling thread (0 elsewhere: only /proc uses it).
+int ThisThreadId() {
+#if defined(__linux__)
+  return int(gettid());
+#else
+  return 0;
+#endif
+}
+
+// The calling host thread's name, for the logs and the port's-own-thread test.
+void ThisThreadName(char* out, size_t size) {
+#if defined(__linux__)
+  pthread_getname_np(pthread_self(), out, size);
+#else
+  if (size) out[0] = 0;
+#endif
+}
 
 // Statuses that are not a wake (the wait ran out): STATUS_TIMEOUT.
 constexpr uint32_t kStatusTimeout = 0x00000102;
@@ -95,6 +120,9 @@ std::atomic<int> g_main_tid{0};  // set when the main thread closes the gate
 
 // Is the main thread asleep (state S/D in /proc), not running or ready?
 bool MainThreadAsleep() {
+#if !defined(__linux__)
+  return false;
+#else
   const int tid = g_main_tid.load();
   if (tid <= 0) return false;
   char path[64];
@@ -107,6 +135,7 @@ bool MainThreadAsleep() {
   }
   const char* close = std::strrchr(stat, ')');
   return close && close[1] == ' ' && (close[2] == 'S' || close[2] == 'D');
+#endif
 }
 
 bool Gating() {
@@ -131,8 +160,8 @@ Slot* MySlot() {
     const int s = g_next_slot.fetch_add(1);
     if (s >= kSlots) return nullptr;
     t_slot = s;
-    pthread_getname_np(pthread_self(), g_slots[s].name, sizeof(g_slots[s].name));
-    g_slots[s].tid = int(gettid());
+    ThisThreadName(g_slots[s].name, sizeof(g_slots[s].name));
+    g_slots[s].tid = ThisThreadId();
     // The port's OWN threads that run game code (their pace is set by us:
     // Sound Out mixes on game frames already, VBlank ticks on the clock) and
     // the main thread itself are not helpers to wait for. They wait mostly
@@ -156,10 +185,13 @@ Slot* MySlot() {
 // Game threads = the guest thread names: "XThread...", "audio::...",
 // "ClipLoadThread"; the port's own and the SDK's host threads aren't.
 bool GameThreadRunnable() {
+#if !defined(__linux__)
+  return false;
+#else
   DIR* dir = opendir("/proc/self/task");
   if (!dir) return false;
   bool runnable = false;
-  const int self = int(gettid());
+  const int self = ThisThreadId();
   const int n = std::min(g_next_slot.load(), kSlots);
   while (dirent* e = readdir(dir)) {
     const int tid = std::atoi(e->d_name);
@@ -205,13 +237,19 @@ bool GameThreadRunnable() {
   }
   closedir(dir);
   return runnable;
+#endif
 }
 
 // Has this tracked thread ended (no /proc/self/task/<tid> any more)?
 bool Ended(const Slot& s) {
+#if !defined(__linux__)
+  (void)s;
+  return false;
+#else
   char path[64];
   std::snprintf(path, sizeof(path), "/proc/self/task/%d", s.tid.load());
   return access(path, F_OK) != 0;
+#endif
 }
 
 // Every tracked thread inside a wait (or ended)?
@@ -313,7 +351,7 @@ void OpenGate() {
 
 void CloseGate() {
   if (!Gating()) return;
-  g_main_tid = int(gettid());
+  g_main_tid = ThisThreadId();
   std::lock_guard<std::mutex> lock(g_gate_mutex);
   g_gate_open = false;
 }
