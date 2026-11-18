@@ -444,7 +444,8 @@ counts already differ before the drift (1,242,296 against 1,243,304 at game
 frame 1800): something the fingerprint doesn't cover parted earlier. Not
 proven: the fingerprint logs were off in that run.
 
-**A way to give Windows the wait wrappers**, not tried yet: the runtime
+**The fix: the wait wrappers on Windows** (built, `system/wait_imports_win.cpp`,
+`system/thread_states.*`). The runtime
 library is a DLL that exports every `__imp__<Name>` (`rexruntime`,
 `WINDOWS_EXPORT_ALL_SYMBOLS`), and the generated code calls them by name
 through the import library. A definition of `__imp__KeWaitForSingleObject`
@@ -453,7 +454,22 @@ of the import (the import library only fills symbols nothing else defines),
 and the original is still reachable with `GetProcAddress` on the runtime
 DLL. The `/proc` questions have Windows answers too: a thread's run state
 and wait state from `NtQuerySystemInformation` (SystemProcessInformation),
-its name from `GetThreadDescription`, its end from `GetExitCodeThread`.
+its name from `GetThreadDescription`. (The thread's end: gone from the
+same snapshot, or Terminated.) `helper_threads.cpp` keeps its logic and asks
+`thread_states` instead of `/proc` on Windows. lld-link uses the
+executable's definitions with no duplicate-symbol complaint from the
+import library; the log names each wait the first time it goes through the
+rules (four of the five showed in the first second of a run).
+
+| Test, with the wrappers (same save, same recordings) | Result |
+|---|---|
+| 40 s, player 2 joins | in sync; the end the same as the run without the wrappers (titan 25.6, player 2 152.0, the same positions) |
+| the 5-minute session that drifted at frame 1748, three times | **in sync on every frame, three times out of three** (18,800 frames each, both players' tracks identical on all 18,038 replay frames); the three sessions end in the SAME state (player 1 74.9, player 2 58.1, the same positions), where the drifting run without the wrappers ended elsewhere (162.5 / 75.5) |
+| frame rate (host, the 5-minute run) | 60.0 fps over 5 s windows, 58.8 average over the session including the start; frames waiting at the gate: 2-111 per session (about 2 s, almost all of it the first frame, while the guest's copy finished loading) |
+
+Not covered yet: two PCs, a level change and a cutscene with the wrappers on
+Windows, Linux with this branch's `thread_states`-free path (unchanged
+code there).
 
 ## 7. Not yet
 
