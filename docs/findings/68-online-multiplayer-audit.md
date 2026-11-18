@@ -63,8 +63,11 @@ roster, the frame clock and the desync check.
 
 ## 4. Still open
 
-1. **Experiment E1**: the same recording replayed on two PCs, then Linux vs
-   Windows, then with enemies, a cutscene, 10 minutes (architecture.md s.8).
+1. **Experiment E1**: on one Windows PC done for walking, jumping,
+   attacks, pick-ups and a titan fight (s.6), with one unexplained
+   difference in 12 runs on one save; still to do: a level change, a
+   cutscene, 10 minutes, two players, another CPU, Linux vs Windows
+   (architecture.md s.8).
 2. The main loop's "loading done" check (a frame-agreed level change).
 3. Which game logic reads sound state.
 4. Every caller of the random generator and its thread.
@@ -139,6 +142,37 @@ In that run the titan lost hitpoints (40 -> 37 of 100), two of the other
 characters went (23 -> 21) and their hitpoints changed six times: the world
 fingerprint (positions and hitpoints of every one of them) was the same on
 every frame of all four runs.
+
+A third save (another area, 14-22 other damageable characters coming and
+going, one of them with a hitpoint pointer that reads as garbage) was run
+three times, four runs each:
+
+| Batch | A vs B | C vs D (same time) | A vs C | A vs D |
+|---|---|---|---|---|
+| 1 | identical | **world hash differs from replay frame 562 on** | identical | **differs from 562 on** |
+| 2 | identical | identical | identical | identical |
+| 3 | identical | identical | identical | identical |
+
+**The one difference.** In batch 1, run D (one of the two loading at the
+same time) parts from the other three at replay frame 562, the moment the
+count of other characters goes from 14 to 15 (a new one appears), and stays
+different to the end. The players' rows stay identical, and so do the
+world row's count and its position and hitpoint sums. Only the hash that
+includes each character's guest address and exact bits differs. Two
+explanations fit, and that run can't tell them apart (the address-free
+hash was added after it):
+
+1. the character created at frame 562 got another heap address in run D
+   (a different heap layout: the "guest heap order" threat of
+   feasibility.md s.2); its position and health the same;
+2. the character whose hitpoint pointer reads as garbage: in run D that
+   memory held other bits (not game state, a stale read), and the sum of
+   hitpoints, dominated by the garbage value, hides it.
+
+11 of 12 runs on this save matched in every column. What decides it: run
+the batch until it happens again with the address-free hash (vy:vz), and
+dump each character (address, position bits, hitpoint pointer) at the
+first differing frame.
 
 Still not covered: a level change, a cutscene with dialogue, 10 minutes, a
 second player, another CPU, Linux.
