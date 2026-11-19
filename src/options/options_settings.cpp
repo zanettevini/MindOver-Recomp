@@ -1601,7 +1601,8 @@ bool OnlineMine(Env& env) { return !net::InSession() || env.player == net::Local
 std::u16string OnlineStatus() {
   const net::Status st = net::GetStatus();
   std::u16string line;
-  const std::u16string peer = Utf16(st.peer);
+  // The other PC's address without its port (the card is small).
+  const std::u16string peer = Utf16(st.peer.substr(0, st.peer.rfind(':')));
   switch (st.role) {
     case net::Role::kNone:
       line = g_online_error.empty() ? tr(u"Not in an online game.")
@@ -1631,7 +1632,12 @@ std::u16string OnlineStatus() {
   return line;
 }
 
-std::u16string WithStatus(const std::u16string& help) { return help + u"\n\n" + OnlineStatus(); }
+// The row's help, then the status; once in an online game the status alone
+// (help + joined + ping ran into the card's warning line: 2026-11-18 photo).
+std::u16string WithStatus(const std::u16string& help) {
+  if (net::GetStatus().role != net::Role::kNone) return OnlineStatus();
+  return help + u"\n\n" + OnlineStatus();
+}
 
 std::u16string MainMenuOnly() {
   if (net::Configured()) return tr(u"Already in an online game: Leave first.");
