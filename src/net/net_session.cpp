@@ -286,6 +286,9 @@ sockaddr_in g_peer{};       // the one peer (host: learned from HELLO; guest: th
 bool g_have_peer = false;   // host: a guest said HELLO
 bool g_welcomed = false;    // handshake done
 uint32_t g_token = 0;       // the session's token (host makes it)
+// The host's own token for the games list: its own ANNOUNCE (heard through
+// 127.0.0.1 / the broadcast) is not listed on its own Multiplayer tab.
+std::atomic<uint32_t> g_own_game{0};
 int g_local = 0, g_remote = 1;
 int g_delay = 3;
 // The input delay is FINAL (host: picked; guest: the host's DELAY received).
@@ -1035,6 +1038,7 @@ void SearchThread(int port) {
     r.U8();
     const std::string name = r.Text(32), build = r.Text(kBuildLength);
     if (!r.ok || host_port <= 0) continue;
+    if (id == g_own_game.load() && g_role.load() == Role::kHost) continue;  // our own game
     char ip[INET_ADDRSTRLEN] = {};
     inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
     const bool loopback = (ntohl(from.sin_addr.s_addr) >> 24) == 127;
@@ -1051,7 +1055,7 @@ void SearchThread(int port) {
     f.game.open = open;
     f.seen = Clock::now();
     if (added) {
-      REXLOG_INFO("Network: found a game: {} at {}:{} (version {}{}{})", name, ip, host_port, build,
+      REXLOG_INFO("Network: found a game: {} at {}:{} (version {}{}{})", name, f.game.address, host_port, build,
                   f.game.same_version ? "" : ", NOT this one", open ? "" : ", full");
     }
   }
@@ -1101,6 +1105,7 @@ std::string Host(int port) {
   ResetSessionLocked();
   if (std::string why = OpenSocket(port); !why.empty()) return why;
   g_token = std::random_device{}() | 1u;
+  g_own_game = g_token;
   g_host_port = port;
   g_local = 0;
   g_remote = 1;

@@ -648,6 +648,58 @@ normal starts after it no frame waited that long. (The test script got
 | **30 minutes** of random play with LB (`lan_*_30min.txt`, seeds 77 / 88), Simple and Keep Spinning on | in sync on every frame through session frame 108,810; both players' tracks identical on all 108,051 replay frames (212 co-op state changes on the way: deaths, masks, rejoins); 60.0 fps in the last windows, 59.8 average over the 30 min |
 | 30 more level starts (s.6j's hunt), 10 of them with the 40 ms link | no crash, no stuck load, no drift (the 10 linked ones failed only in the test's track compare: the last track line cut off when the game was closed; `same_track.py` skips it now) |
 
+## 6l. The Multiplayer menu and LAN discovery (2026-11-18)
+
+A player doesn't need the F1 Tools window or command-line flags any more:
+
+* **Main menu -> Extras -> Multiplayer** (the Extras set is now Multiplayer,
+  Players, Credits; `options/options_page.cpp` adds the item, a copy of the
+  PS2 item, before Players; `ui/main_menu_extras.cpp` writes its word). It
+  opens the Options screen on its new **Multiplayer** tab
+  (`options_menu::OpenOnlineNext`), after Language.
+* The tab (`options_settings.cpp` OnlineRows, a *live* tab: refreshed every
+  250 ms while it shows):
+  * **Host** -> *Host a Game*: `net::Host(net_port)`; the card says
+    "Hosting: waiting for player 2", then who joined.
+  * **Join** -> *Game*: the games found on the network (name of the PC,
+    version; "Searching..." while none), *Join*: `net::Join` to the chosen one.
+  * **Session** -> *Input Delay* (Automatic, or 3-15 frames: `net_delay_auto`
+    / `net_delay`) and *Leave*.
+  * The rows are greyed out once a session is set up or in a level (Host /
+    Join only from the main menu); in a session only the menu owner's PC acts.
+* **Discovery** (`net_session.cpp`, protocol 5 types 10 / 11): while the tab
+  shows (`net::KeepSearching`, it stops 3 s after the tab closes) a search
+  thread sends a DISCOVER every second, on its own socket with SO_BROADCAST,
+  to 255.255.255.255, to each local address's /24 broadcast and to
+  127.0.0.1, on the game's port. A host answers (before the protocol check,
+  so an older or newer version still shows, marked) with an ANNOUNCE: its id,
+  port, open / full, PC name (gethostname) and build. Entries expire 3.5 s
+  after their last answer. A host heard at 127.0.0.1 is on this PC: that
+  address wins (its other address was a VPN's, 54.x, in the first run: not
+  reachable from here). A host doesn't list its own game.
+* Both PCs still load **the same save** with Load Game after Host / Join (as
+  before: the session starts at the load).
+
+**Tests** (one PC, two copies booted normally, 960x540 windows, separate save
+folders with the same save; `tools/lan_tests/menu_one_pc.ps1` +
+`menu_drive.py`, the menus driven through the debug console like a pad):
+
+* The first runs failed in the *test*: three quick DOWNs on the main menu
+  moved the cursor once (or not at all), and a B in the first set leaves for
+  the title. The debug console's `frontend` now also says
+  `main menu: set first|extras, item N, input on|off` and
+  `options: tab <name>, row <label>`, and the driver presses one button at a
+  time, each checked (the cursor moved) before the next.
+* menu4 (2026-11-18 21:45): host: Extras -> Multiplayer -> Host a Game; the
+  guest found "DESKTOP-U9JUPDV" 2 s after the tab opened, Game -> Join:
+  joined at 127.0.0.1 as player 2, delay picked 3 frames (ping 0.1 ms); both
+  B back, Load Game, the save: SESSION START on both, in level at the same
+  second; in sync through session frame 1,198 (no drift).
+* menu5 (21:49, with the host's own game left out of its list): the same,
+  then player 2 dropped in with START on the guest's pad (the mask, on both
+  PCs) and pressed a few buttons: in sync through session frame 1,798, both
+  PCs' `players` alike (p2 at (-16.32, -10.5, -34.76)).
+
 ## 7. Not yet
 
 * Coming back after a disconnect (late join / reconnect: the plan's milestone M5).
@@ -660,8 +712,8 @@ normal starts after it no frame waited that long. (The test script got
   on both. The save itself isn't sent or checked (a different save shows as a
   drift at frame 0).
 * Two players, one per PC; menus, pause and cutscene-skip rules; late join;
-  the internet; a menu in the game's own look. Windows: the socket code is
-  written but not built there yet.
+  the internet. (A menu in the game's own look: done, s.6l. Windows: built
+  and tested since s.6h.)
 
 ## Controls
 
@@ -670,5 +722,7 @@ normal starts after it no frame waited that long. (The test script got
   picks from the ping: s.6j), `--net_drop_after_s` (default 30). Both turn the fixed step on (60).
 * Tests: `--debug_net_lag_ms`, `--debug_net_jitter_ms`, `--debug_net_loss_percent` (a bad network on
   this PC's sends, s.6j).
+* **Main menu -> Extras -> Multiplayer** (s.6l): Host a Game, the games on the network, Join,
+  Input Delay, Leave. Then both PCs: Load Game, the same save.
 * F1 Tools -> **Network (LAN co-op test)**: Host / Join / Leave and the status.
 * Debug console: `net` (status line), `net dump`, `net leave`.
