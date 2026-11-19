@@ -4,8 +4,10 @@
 #include "main_menu_extras.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 
@@ -43,6 +45,7 @@ constexpr uint32_t kBackSoundReturn = 0x820CEED8;
 constexpr std::string_view kMainMenuPage = "GameStart_Start_Xenon";
 constexpr std::string_view kMainMenuMenu = "StartMenu";
 constexpr std::u16string_view kExtrasWords = trn(u"Extras");  // shown as tr()
+constexpr std::u16string_view kOnlineWords = trn(u"Multiplayer");  // shown as tr()
 
 // THE SWAP'S TRANSITION (2026-10-30: the new set just popped in): the set
 // coming in slides kSlideUnits in from the side (the right going into Extras,
@@ -55,10 +58,15 @@ constexpr auto kSwapTime = std::chrono::milliseconds(220);
 bool g_extras = false;  // the Extras set shows
 // The Extras item last picked (Players / Credits): back from its screen the
 // cursor is there again (the game's menu comes back on its first item).
-int g_last_pick = options_page::kMainMenuPlayersItem;
+int g_last_pick = options_page::kMainMenuOnlineItem;
 Clock::time_point g_swap_start{};  // {} = no transition running
 float g_swap_from = 0;             // +1 = in from the right, -1 = from the left
 std::unordered_map<uint32_t, float> g_home_x;  // a text element -> its own x (+92), as the page has it
+// For the debug console's "frontend" (DebugText): the list's selection and
+// whether the menus take input, as of the last front-end update (-1 = no
+// main menu). Tests drive the menu one press at a time against these.
+std::atomic<int> g_debug_selection{-1};
+std::atomic<bool> g_debug_input{false}, g_debug_extras{false};
 
 float ReadF(const uint8_t* base, uint32_t address) {
   const uint8_t* p = GuestPtr(base, address);
@@ -161,7 +169,7 @@ void Swap(PPCContext& ctx, uint8_t* base, uint32_t screen, uint32_t menu, bool e
     *GuestPtr(base, fe + kMenuFlags) &= uint8_t(~kMenusTakeInput);
     *GuestPtr(base, fe + kResultFlags) &= uint8_t(~(kFlagAccept | kFlagCancel));
   }
-  REXLOG_INFO("Main menu: {}", extras ? "Extras (Players, Credits)" : "back to the first items");
+  REXLOG_INFO("Main menu: {}", extras ? "Extras (Multiplayer, Players, Credits)" : "back to the first items");
 }
 
 }  // namespace
@@ -170,10 +178,23 @@ void FrontEndFrame(PPCContext& ctx, uint8_t* base) {
   const uint32_t menu = MainMenu(ctx, base);
   if (!menu) {
     if (!g_home_x.empty()) g_home_x.clear();  // (the page is gone: its elements too)
+    g_debug_selection = -1;
     return;
   }
   Word(ctx, base, menu, options_page::kMainMenuExtrasItem, tr(kExtrasWords));
+  Word(ctx, base, menu, options_page::kMainMenuOnlineItem, tr(kOnlineWords));
   ShowSet(ctx, base, menu);
+  g_debug_extras = g_extras;
+  g_debug_selection = scrooby::Selection(base, menu);
+  const uint32_t fe = FrontEnd(base);
+  g_debug_input = fe && (*GuestPtr(base, fe + kMenuFlags) & kMenusTakeInput) && !Swapping();
+}
+
+std::string DebugText() {
+  const int selection = g_debug_selection.load();
+  if (selection < 0) return "main menu: none";
+  return "main menu: set " + std::string(g_debug_extras.load() ? "extras" : "first") + ", item " +
+         std::to_string(selection) + ", input " + (g_debug_input.load() ? "on" : "off");
 }
 
 bool Swapping() { return g_swap_start != Clock::time_point{}; }
@@ -191,12 +212,13 @@ void AfterScreenUpdate(PPCContext& ctx, uint8_t* base, uint32_t screen, uint32_t
   const uint32_t menu = MainMenu(ctx, base);
   if (!menu) return;
   const int picked = scrooby::Selection(base, menu);
-  if (after == kStatePicked && (picked == options_page::kMainMenuPlayersItem ||
+  if (after == kStatePicked && (picked == options_page::kMainMenuOnlineItem ||
+                                picked == options_page::kMainMenuPlayersItem ||
                                 picked == options_page::kMainMenuCreditsItem)) {
     g_last_pick = picked;  // (leaves the menu as before)
   }
   if (after == kStatePicked && picked == options_page::kMainMenuExtrasItem) {
-    Swap(ctx, base, screen, menu, true, options_page::kMainMenuPlayersItem);
+    Swap(ctx, base, screen, menu, true, options_page::kMainMenuOnlineItem);
   } else if (g_extras && after == kStateBack) {
     // B in the Extras set: the first set again, on Extras (its closing sound
     // was dropped: DropSound; the menu's move sound instead).

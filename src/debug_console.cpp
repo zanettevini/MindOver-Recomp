@@ -54,6 +54,8 @@
 #include "data/fight_tree.h"
 #include "pddi/intercept.h"
 #include "debug_input_script.h"
+#include "ui/main_menu_extras.h"
+#include "options/options_menu.h"
 #include "input_record.h"
 #include "input/prompt_icons.h"
 #include "native/ab_capture.h"
@@ -1111,7 +1113,8 @@ std::string Run(std::string_view line) {
   if (verb == "help") return kHelp;
   if (verb == "state") return State();
   if (verb == "players") return Players();
-  if (verb == "frontend") return FrontEndText() + "\n";
+  if (verb == "frontend") return FrontEndText() + "\n" + main_menu_extras::DebugText() + "\n" +
+                                     options_menu::DebugText() + "\n";
   if (verb == "eval" && w.size() >= 2) {
     const uint32_t v = Eval(line.substr(line.find("eval") + 4));
     return fmt::format("0x{:08X} ({})\n", v, v);

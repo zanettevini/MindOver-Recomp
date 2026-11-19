@@ -90,6 +90,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include <rex/cvar.h>
 
@@ -191,6 +192,22 @@ struct Status {
   bool dropped = false;          // ... and their player dropped out
 };
 Status GetStatus();
+
+// --- finding games on the network (the Online tab) ----------------------------
+struct LanGame {
+  std::string name;      // the host PC's name
+  std::string address;   // its IP
+  int port = 0;
+  std::string build;     // its version
+  bool same_version = false;  // protocol and version like this copy's (else it can't be joined)
+  bool open = false;          // waiting for a player (not full)
+};
+// Keeps looking for hosts on this network (a DISCOVER every second, by
+// broadcast and to 127.0.0.1) for 3 s more; call it while the list shows.
+// Any thread.
+void KeepSearching();
+// The hosts that answered in the last 3.5 s, by name. Any thread.
+std::vector<LanGame> LanGames();
 // "Dump both sides": both PCs dump the world at the same session frame (a
 // second from now). Returns the reply text.
 std::string RequestDump();

@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #include <string>
 
 #include <fmt/format.h>
@@ -266,10 +267,14 @@ bool ListMode() {
 // or side card.
 bool OtherMode() { return g.achievements || g.players; }
 std::atomic<bool> g_open{false};
+std::atomic<bool> g_open_online{false};  // OpenOnlineNext: the next opening is on the Online tab
+std::chrono::steady_clock::time_point g_live_refreshed{};  // a live tab's last refresh (Update)
 // The open tab asks for the subtitles' sample (options_settings.h Tab
 // subtitle_preview): mirrored here for the subtitles' drawing (UI thread).
 std::atomic<bool> g_subtitle_preview{false};
 void UpdateSubtitlePreview();  // below: g_subtitle_preview from the tab and row
+std::mutex g_debug_mutex;  // DebugText
+std::string g_debug_text;
 std::atomic<bool> g_wheel_list{false};  // WheelScrollsList: open and the tab slides (Refresh)
 // The Players screen takes input now (front end +8592 bit 0x40, read by its
 // Update each frame): its prompt row shows only then, like the game's own
@@ -1924,6 +1929,16 @@ void UpdateSubtitlePreview() {
   const bool on = !g.players && !g.achievements && g.tab >= 0 && g.tab < int(tabs.size()) &&
                   tabs[size_t(g.tab)].subtitle_preview && row && row->subtitle_preview;
   g_subtitle_preview.store(on, std::memory_order_relaxed);
+  // For the debug console (DebugText): the tab and the row under the cursor.
+  std::string text = "options: tab ";
+  auto ascii = [&](const std::u16string& w) {
+    for (char16_t c : w) text += c < 128 ? char(c) : '?';
+  };
+  if (g.tab >= 0 && g.tab < int(tabs.size())) ascii(tabs[size_t(g.tab)].name);
+  text += ", row ";
+  if (row) ascii(row->label);
+  std::lock_guard lock(g_debug_mutex);
+  g_debug_text = std::move(text);
 }
 
 void SwitchTab(Env& env, int delta) {
@@ -2285,7 +2300,16 @@ void SeePad(uint32_t user, const uint8_t* gamepad) {
 }
 
 bool Open() { return g_open.load(std::memory_order_relaxed); }
+void OpenOnlineNext() {
+  g_open_online = true;
+  REXLOG_INFO("Options: the screen opens next on the Online tab");
+}
 bool SubtitlePreview() { return Open() && g_subtitle_preview.load(std::memory_order_relaxed); }
+std::string DebugText() {
+  if (!Open()) return "options: closed";
+  std::lock_guard lock(g_debug_mutex);
+  return g_debug_text;
+}
 bool InMainMenu() { return Open() && g.main_menu; }
 bool WheelScrollsList() { return Open() && g_wheel_list.load(std::memory_order_relaxed); }
 
@@ -2379,6 +2403,11 @@ extern "C" REX_FUNC(sub_820D2828) {
   // THE PLAYERS SCREEN (players/players_setup.h): the third mode, when the
   // main / pause menu's "Players" asked (and the page has its cards).
   g.players = players_setup::TakeOpenNext() && !g.achievements;
+  // THE ONLINE TAB (options_settings.cpp OnlineRows): the main menu's
+  // "Online" opens the Options screen there.
+  if (g_open_online.exchange(false) && !g.achievements && !g.players && options_settings::OnlineTab() >= 0) {
+    g.tab = options_settings::OnlineTab();
+  }
   g.ply_drawn.clear();
   g.selection = -1;
   g.focused = -1;
@@ -2749,6 +2778,15 @@ extern "C" REX_FUNC(sub_820D2A00) {
       g.sizes_aspect = aspect;
     }
   }
+  // A LIVE TAB (Online: the games found, the session's status) refreshes
+  // itself 4 times a second.
+  if (!OtherMode() && options_settings::Tabs()[size_t(g.tab)].live) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now - g_live_refreshed >= std::chrono::milliseconds(250)) {
+      g_live_refreshed = now;
+      refresh = true;
+    }
+  }
   if (refresh || scrooby::Selection(base, g.menu) != g.selection) {
     Refresh(env);
   } else {
@@ -2903,10 +2941,11 @@ extern "C" REX_FUNC(sub_8211B6C8) {
   // quit_game.cpp take them back); should one get here, stay.
   constexpr int32_t kStay = -1;
   constexpr int32_t kExits[] = {kExitNewGame, kExitLoadGame, kExitOptions, kStay,
-                                kStay,        kExitOptions,  kExitCredits};
+                                kStay,        kExitOptions,  kExitOptions, kExitCredits};
   static_assert(std::size(kExits) == options_page::kMainMenuItemCount);
   static_assert(kExits[options_page::kMainMenuOptionsItem] == kExitOptions);
   static_assert(kExits[options_page::kMainMenuPlayersItem] == kExitOptions);
+  static_assert(kExits[options_page::kMainMenuOnlineItem] == kExitOptions);
   static_assert(kExits[options_page::kMainMenuCreditsItem] == kExitCredits);
   if (index >= 0 && index < int(std::size(kExits)) && kExits[index] == kStay) {
     ctx.r3.s64 = -1;
@@ -2924,6 +2963,9 @@ extern "C" REX_FUNC(sub_8211B6C8) {
     } else {
       ctx.r3.s64 = -1;  // no cards on the page: stay
     }
+  } else if (index == options_page::kMainMenuOnlineItem) {
+    options_menu::OpenOnlineNext();  // the Options screen on its Multiplayer tab
+    REXLOG_INFO("Options: main menu -> Multiplayer");
   } else if (index == options_page::kMainMenuOptionsItem) {
     REXLOG_INFO("Options: main menu -> Options");
   }

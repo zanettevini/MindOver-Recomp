@@ -90,15 +90,17 @@ bool MainMenuAvailable();
 // The main menu's items with it, in TWO SETS (2026-10-30, ui/main_menu_extras.h:
 // the list had grown to six). Shown first: New Game, Load Game, OPTIONS,
 // EXTRAS, QUIT GAME (ui/quit_game.h). Extras swaps the list for the second
-// set: PLAYERS, Credits (B goes back). One menu holds all seven (the hidden
-// set is hidden and not selectable). (Achievements: the pause menu only.)
+// set: MULTIPLAYER (the Options screen on its Multiplayer tab: LAN games,
+// 2026-11-18), PLAYERS, Credits (B goes back). One menu holds all eight (the
+// hidden set is hidden and not selectable). (Achievements: the pause menu only.)
 constexpr int kMainMenuOptionsItem = 2;
 constexpr int kMainMenuExtrasItem = 3;
 constexpr int kMainMenuQuitItem = 4;
-constexpr int kMainMenuPlayersItem = 5;
-constexpr int kMainMenuCreditsItem = 6;
+constexpr int kMainMenuOnlineItem = 5;
+constexpr int kMainMenuPlayersItem = 6;
+constexpr int kMainMenuCreditsItem = 7;
 constexpr int kMainMenuTopItems = 5;    // items 0-4: the first set
-constexpr int kMainMenuItemCount = 7;   // + 5-6: the Extras set
+constexpr int kMainMenuItemCount = 8;   // + 5-7: the Extras set
 // Whether the pause pages got their "Players" and "Achievements" items
 // (right after Options, in that order; options_page.cpp AddPauseItems).
 bool PauseAchievementsAvailable();

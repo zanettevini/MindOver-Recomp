@@ -33,6 +33,12 @@
 //                            fingerprint count (0-16),
 //                            that many x (i32 frame, u64 fingerprint)
 //   PING / PONG              u64 sender's clock (ns); PONG echoes it
+//   DISCOVER (anyone -> broadcast / 127.0.0.1, token 0)  nothing: hosts, answer
+//   ANNOUNCE (host -> the asker, token 0)  u32 the host's id, u16 its port,
+//                            u8 1 = waiting for a player, u8 0,
+//                            char name[32] (the PC's name), char build[32]
+//                            (both sent whatever the asker's protocol, so an
+//                            older copy can say "another version")
 //   DELAY   (host -> guest)  u8 the session's input delay, final (sent with
 //                            every ping until the session starts: the host
 //                            picks it from the measured ping, net_delay_auto)
@@ -141,6 +147,8 @@ enum Type : uint8_t {
   kBye = 7,
   kDump = 8,
   kDelay = 9,
+  kDiscover = 10,
+  kAnnounce = 11,
 };
 constexpr size_t kHeader = 12;
 constexpr int kMaxInputsPerPacket = 64;  // the most a packet may carry (checked on receipt)
@@ -532,6 +540,32 @@ void GoAloneLocked(const std::string& why, bool keep, bool me_lost_it) {
 // -----------------------------------------------------------------------------
 // 2. THE NETWORK THREAD
 // -----------------------------------------------------------------------------
+int g_host_port = 0;  // the port this host listens on (ANNOUNCE)
+
+// This PC's name for the games list (ASCII; the computer's name).
+std::string PcName() {
+  char name[256] = {};
+  if (gethostname(name, sizeof(name) - 1) != 0 || !name[0]) return "Crash PC";
+  return name;
+}
+
+// HOST: a DISCOVER from anyone on the network: say who we are.
+void SendAnnounceLocked(const sockaddr_in& to) {
+  Writer w;
+  w.Bytes(kMagic, 4);
+  w.U8(kProtocol);
+  w.U8(kAnnounce);
+  w.U16(0);
+  w.U32(0);
+  w.U32(g_token);
+  w.U16(uint16_t(g_host_port));
+  w.U8(g_have_peer ? 0 : 1);
+  w.U8(0);
+  w.Text(PcName(), 32);
+  w.Text(Build(), kBuildLength);
+  SendTo(w, to);
+}
+
 void SendWelcome() {
   Writer w;
   Header(w, kWelcome);
@@ -574,6 +608,11 @@ void HandlePacket(const uint8_t* data, size_t size, const sockaddr_in& from) {
   std::lock_guard lock(g_m);
   const Role role = g_role.load();
   if (role == Role::kNone) return;
+  // A PC looking for games (Online tab): any version gets the answer.
+  if (role == Role::kHost && type == kDiscover) {
+    SendAnnounceLocked(from);
+    return;
+  }
   if (protocol != kProtocol) {
     if (role == Role::kHost && type == kHello) Refuse(from, "different protocol (update the game)");
     return;
@@ -887,7 +926,169 @@ void NeedFixedStep() {
   }
 }
 
+// -----------------------------------------------------------------------------
+// FINDING GAMES ON THE NETWORK (the Online tab, net/online_menu.cpp): a
+// socket of its own (any port), a DISCOVER every second to the broadcast
+// address and to 127.0.0.1 (two copies on one PC), the hosts' ANNOUNCEs
+// gathered. It runs while someone keeps asking (KeepSearching, the tab's
+// refresh) and stops 3 s after the last ask.
+// -----------------------------------------------------------------------------
+struct Found {
+  LanGame game;
+  Clock::time_point seen;
+};
+std::mutex g_search_m;
+std::map<uint32_t, Found> g_found;  // by the host's id
+Clock::time_point g_search_wanted{};
+bool g_searching = false;
+
+void SearchThread(int port) {
+  const Socket sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (sock == kNoSocket) {
+    std::lock_guard lock(g_search_m);
+    g_searching = false;
+    return;
+  }
+  int yes = 1;
+  setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (const char*)&yes, sizeof(yes));
+  sockaddr_in me{};
+  me.sin_family = AF_INET;
+  me.sin_addr.s_addr = htonl(INADDR_ANY);
+  me.sin_port = 0;
+  bind(sock, (const sockaddr*)&me, sizeof(me));
+  // Where to ask: everyone (255.255.255.255: the interface of the default
+  // route only, which may be a VPN's), each of this PC's own networks as a
+  // /24 (x.y.z.255: a home network's usual shape), and 127.0.0.1 (two
+  // copies on one PC).
+  std::vector<uint32_t> targets{0xFFFFFFFFu, 0x7F000001u};
+  {
+    addrinfo hints{}, *found = nullptr;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    if (getaddrinfo(PcName().c_str(), nullptr, &hints, &found) == 0) {
+      for (const addrinfo* a = found; a; a = a->ai_next) {
+        const uint32_t ip = ntohl(reinterpret_cast<const sockaddr_in*>(a->ai_addr)->sin_addr.s_addr);
+        if ((ip >> 24) == 127) continue;
+        const uint32_t subnet = (ip & 0xFFFFFF00u) | 0xFFu;
+        if (std::find(targets.begin(), targets.end(), subnet) == targets.end()) targets.push_back(subnet);
+      }
+      freeaddrinfo(found);
+    }
+  }
+  REXLOG_INFO("Network: looking for games on this network (UDP port {}, {} addresses asked)", port, targets.size());
+  auto next_ask = Clock::now();
+  std::vector<uint8_t> buffer(512);
+  while (true) {
+    const auto now = Clock::now();
+    {
+      std::lock_guard lock(g_search_m);
+      if (now - g_search_wanted > std::chrono::seconds(3)) {
+        g_searching = false;
+        g_found.clear();
+        break;
+      }
+      for (auto it = g_found.begin(); it != g_found.end();) {
+        it = now - it->second.seen > std::chrono::milliseconds(3500) ? g_found.erase(it) : std::next(it);
+      }
+    }
+    if (now >= next_ask) {
+      next_ask = now + std::chrono::seconds(1);
+      Writer w;
+      w.Bytes(kMagic, 4);
+      w.U8(kProtocol);
+      w.U8(kDiscover);
+      w.U16(0);
+      w.U32(0);
+      for (const uint32_t ip : targets) {
+        sockaddr_in to{};
+        to.sin_family = AF_INET;
+        to.sin_addr.s_addr = htonl(ip);
+        to.sin_port = htons(uint16_t(port));
+        sendto(sock, (const char*)w.b.data(), int(w.b.size()), 0, (const sockaddr*)&to, sizeof(to));
+      }
+    }
+#if defined(_WIN32)
+    fd_set set;
+    FD_ZERO(&set);
+    FD_SET(sock, &set);
+    timeval tv{0, 100000};
+    const int ready = select(0, &set, nullptr, nullptr, &tv);
+#else
+    pollfd pfd{sock, POLLIN, 0};
+    const int ready = poll(&pfd, 1, 100);
+#endif
+    if (ready <= 0) continue;
+    sockaddr_in from{};
+    socklen_t from_size = sizeof(from);
+    const int got = int(recvfrom(sock, (char*)buffer.data(), int(buffer.size()), 0, (sockaddr*)&from, &from_size));
+    if (got <= 0 || from.sin_family != AF_INET) continue;
+    Reader r{buffer.data(), size_t(got)};
+    char magic[4];
+    r.Bytes(magic, 4);
+    const uint8_t protocol = r.U8(), type = r.U8();
+    r.U16();
+    r.U32();
+    if (!r.ok || std::memcmp(magic, kMagic, 4) != 0 || type != kAnnounce) continue;
+    const uint32_t id = r.U32();
+    const int host_port = r.U16();
+    const bool open = r.U8() != 0;
+    r.U8();
+    const std::string name = r.Text(32), build = r.Text(kBuildLength);
+    if (!r.ok || host_port <= 0) continue;
+    char ip[INET_ADDRSTRLEN] = {};
+    inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
+    const bool loopback = (ntohl(from.sin_addr.s_addr) >> 24) == 127;
+    std::lock_guard lock(g_search_m);
+    auto [it, added] = g_found.try_emplace(id);
+    Found& f = it->second;
+    // A host that answers at 127.0.0.1 too is on THIS PC: 127.0.0.1 wins
+    // (its other address may be a VPN's, that a join from here can't reach).
+    if (added || loopback) f.game.address = ip;
+    f.game.port = host_port;
+    f.game.name = name;
+    f.game.build = build;
+    f.game.same_version = protocol == kProtocol && build == Build();
+    f.game.open = open;
+    f.seen = Clock::now();
+    if (added) {
+      REXLOG_INFO("Network: found a game: {} at {}:{} (version {}{}{})", name, ip, host_port, build,
+                  f.game.same_version ? "" : ", NOT this one", open ? "" : ", full");
+    }
+  }
+#if defined(_WIN32)
+  closesocket(sock);
+#else
+  close(sock);
+#endif
+  REXLOG_INFO("Network: stopped looking for games");
+}
+
 }  // namespace
+
+void KeepSearching() {
+  std::lock_guard lock(g_search_m);
+  g_search_wanted = Clock::now();
+  if (g_searching) return;
+#if defined(_WIN32)
+  static bool wsa = [] {
+    WSADATA d;
+    return WSAStartup(MAKEWORD(2, 2), &d) == 0;
+  }();
+  if (!wsa) return;
+#endif
+  g_searching = true;
+  std::thread(SearchThread, REXCVAR_GET(net_port)).detach();
+}
+
+std::vector<LanGame> LanGames() {
+  std::lock_guard lock(g_search_m);
+  std::vector<LanGame> out;
+  for (const auto& [id, f] : g_found) out.push_back(f.game);
+  std::sort(out.begin(), out.end(), [](const LanGame& a, const LanGame& b) {
+    return a.name != b.name ? a.name < b.name : a.address < b.address;
+  });
+  return out;
+}
 
 // =============================================================================
 // Public: setting up
@@ -900,6 +1101,7 @@ std::string Host(int port) {
   ResetSessionLocked();
   if (std::string why = OpenSocket(port); !why.empty()) return why;
   g_token = std::random_device{}() | 1u;
+  g_host_port = port;
   g_local = 0;
   g_remote = 1;
   g_delay = std::clamp(REXCVAR_GET(net_delay), 1, 30);

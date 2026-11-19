@@ -993,8 +993,8 @@ bool PatchMainMenu(const Bytes& original, Bytes* patched) {
           items.erase(calibration);
           items.insert(items.begin() + kMainMenuOptionsItem, ps2_item);
           // The order (options_page.h): New Game, Load Game, Options, EXTRAS,
-          // QUIT GAME | PLAYERS, Credits. The new items are copies of
-          // Options' (Extras, Players) or Credits' (Quit) item, renamed
+          // QUIT GAME | MULTIPLAYER, PLAYERS, Credits. The new items are copies
+          // of Options' (Extras, Multiplayer, Players) or Credits' (Quit) item, renamed
           // (siblings keep unique names); their words go in at run time
           // (achievements_screen.cpp, quit_game.cpp, main_menu_extras.cpp:
           // the menus' text bank has none of these strings).
@@ -1010,7 +1010,7 @@ bool PatchMainMenu(const Bytes& original, Bytes* patched) {
             return true;
           };
           if (!copy(ps2_item, "ExtrasItem", "ExtrasItemText") || !copy(credits, "QuitItem", "QuitItemText") ||
-              !copy(ps2_item, "PlayersItem", "PlayersItemText")) {
+              !copy(ps2_item, "OnlineItem", "OnlineItemText") || !copy(ps2_item, "PlayersItem", "PlayersItemText")) {
             return false;
           }
           items.push_back(credits);

@@ -34,6 +34,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <rex/ppc/context.h>
 
@@ -50,9 +51,15 @@ void SeePad(uint32_t user, const uint8_t* gamepad);
 
 // The Options screen is up (for other code that wants to stay out of its way).
 bool Open();
+// The next time the Options screen opens, it opens on the Online tab (the
+// main menu's "Online", ui/main_menu_extras.h).
+void OpenOnlineNext();
 // The Options screen is open on a tab that shows the subtitles' sample (the
 // Accessibility tab): subtitles.cpp draws a sample line. Any thread.
 bool SubtitlePreview();
+// For the debug console's "frontend": "options: tab <name>, row <label>" (the
+// row under the cursor) or "options: closed". Any thread.
+std::string DebugText();
 
 // The screen open is the MAIN MENU's (no game in progress), not the pause
 // menu's. False while closed.

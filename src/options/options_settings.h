@@ -104,10 +104,16 @@ struct Tab {
   // options_menu.h SubtitlePreview), while one of its subtitle rows (Row
   // subtitle_preview) has the cursor.
   bool subtitle_preview = false;
+  // Its rows change without a press (the Online tab: the games found, the
+  // session's status): the screen refreshes it a few times a second.
+  bool live = false;
 };
 
 // The tabs, built once.
 const std::vector<Tab>& Tabs();
+// The Online tab's index in Tabs() (-1 none): the main menu's "Online" opens
+// the Options screen on it (options_menu.h OpenOnlineNext).
+int OnlineTab();
 
 // The keys of a keyboard / mouse action as a row shows them ("Left Mouse,
 // J"; "None"), and the action's name as the rows write it ("Light Attack").

@@ -41,10 +41,15 @@
 #include "global_options.h"
 #include "options_menu.h"
 #include "../system/command_ring.h"
+#include "../net/net_session.h"
+#include "../players/more_players.h"
 
 REXCVAR_DECLARE(int32_t, fps_cap);
 REXCVAR_DECLARE(bool, native_only);
 REXCVAR_DECLARE(bool, coop_camera);
+REXCVAR_DECLARE(int32_t, net_port);
+REXCVAR_DECLARE(int32_t, net_delay);
+REXCVAR_DECLARE(bool, net_delay_auto);
 
 // The game's own options (the original Options screen's code, CMenuAction
 // sub_820D2A00 / sub_820D2F80, traced 2026-10-10). The volumes and Invert
@@ -1581,6 +1586,186 @@ Row SubtitleLingerRow() {
   return r;
 }
 
+// ---------------------------------------------------------------------------
+// Online (net/net_session.h): host a game, find the games on this network,
+// join one, leave; the input delay. The tab refreshes itself while it shows
+// (Tab::live): the list and the status change without a press.
+// ---------------------------------------------------------------------------
+int g_online_pick = 0;          // the game picked in the list
+std::string g_online_error;     // the last Host / Join refusal ("" = none)
+
+// In a session the menus run on the shared input: both PCs see the same
+// press. Only the menu owner's PC acts on it (Leave would end both).
+bool OnlineMine(Env& env) { return !net::InSession() || env.player == net::LocalPlayer(); }
+
+std::u16string OnlineStatus() {
+  const net::Status st = net::GetStatus();
+  std::u16string line;
+  const std::u16string peer = Utf16(st.peer);
+  switch (st.role) {
+    case net::Role::kNone:
+      line = g_online_error.empty() ? tr(u"Not in an online game.")
+                                    : trf(tr(u"Couldn't start: {0}"), {Utf16(g_online_error)});
+      break;
+    case net::Role::kHost:
+      line = !st.connected   ? tr(u"Hosting: waiting for player 2 to join.")
+             : st.alone      ? tr(u"Player 2 left: playing on alone.")
+             : st.in_session ? trf(tr(u"Playing online with {0}."), {peer})
+                             : trf(tr(u"Player 2 joined ({0}). Now both players: Load Game, the same save."), {peer});
+      break;
+    case net::Role::kGuest:
+      line = !st.connected   ? trf(tr(u"Joining {0}..."), {peer})
+             : st.alone      ? tr(u"The host left: playing on alone.")
+             : st.in_session ? trf(tr(u"Playing online with {0}."), {peer})
+                             : trf(tr(u"Joined {0}. Now both players: Load Game, the same save."), {peer});
+      break;
+  }
+  if (st.connected && st.ping_ms >= 0) {
+    line += u"\n" + trf(tr(u"Ping {0} ms, input delay {1} frames."),
+                        {Utf16(fmt::format("{:.0f}", st.ping_ms)), Utf16(std::to_string(st.delay))});
+  }
+  if (st.connected && st.peer_settings_known && st.peer_settings != st.my_settings) {
+    line += u"\n" + tr(u"The two games' settings differ: make them alike, or the games will part.");
+  }
+  if (st.drift_frame >= 0) line += u"\n" + tr(u"The two games no longer show the same world.");
+  return line;
+}
+
+std::u16string WithStatus(const std::u16string& help) { return help + u"\n\n" + OnlineStatus(); }
+
+std::u16string MainMenuOnly() {
+  if (net::Configured()) return tr(u"Already in an online game: Leave first.");
+  if (more_players::InPlay()) return tr(u"Only from the main menu (a session starts when both load a save).");
+  return u"";
+}
+
+std::vector<net::LanGame> OnlineGames() {
+  net::KeepSearching();
+  return net::LanGames();
+}
+
+std::vector<Row> OnlineRows() {
+  std::vector<Row> rows;
+  rows.push_back(Heading(tr(u"Host")));
+  {
+    Row r;
+    r.label = tr(u"Host a Game");
+    r.kind = Kind::kAction;
+    r.unavailable = [](Env&) { return MainMenuOnly(); };
+    r.activate = [](Env& env) {
+      if (!OnlineMine(env)) return;
+      g_online_error = net::Host(REXCVAR_GET(net_port));
+      REXLOG_INFO("Online: Host a Game: {}", g_online_error.empty() ? "hosting" : g_online_error);
+    };
+    r.describe = [](Env&, int) {
+      return WithStatus(tr(u"Wait for player 2 here: the PCs on this network see this game in their list."));
+    };
+    rows.push_back(std::move(r));
+  }
+  rows.push_back(Heading(tr(u"Join")));
+  {
+    Row r;
+    r.label = tr(u"Game");
+    r.values = [](Env&) {
+      std::vector<std::u16string> v;
+      for (const net::LanGame& g : OnlineGames()) {
+        std::u16string name = Utf16(g.name + " (" + g.address + ")");
+        if (!g.same_version) name += u" - " + tr(u"another version");
+        else if (!g.open) name += u" - " + tr(u"full");
+        v.push_back(std::move(name));
+      }
+      if (v.empty()) v.push_back(tr(u"Searching..."));
+      return v;
+    };
+    r.get = [](Env&) { return g_online_pick; };
+    r.set = [](Env&, int i) { g_online_pick = i; };
+    r.describe = [](Env&, int) {
+      return WithStatus(tr(u"The games hosted on this network. Pick one, then Join."));
+    };
+    rows.push_back(std::move(r));
+  }
+  {
+    Row r;
+    r.label = tr(u"Join");
+    r.kind = Kind::kAction;
+    r.unavailable = [](Env&) {
+      std::u16string why = MainMenuOnly();
+      if (!why.empty()) return why;
+      const auto games = net::LanGames();
+      if (games.empty()) return std::u16string(tr(u"No game found on this network yet."));
+      const net::LanGame& g = games[size_t(std::clamp(g_online_pick, 0, int(games.size()) - 1))];
+      if (!g.same_version) return std::u16string(tr(u"That game runs another version of Mind over Recomp."));
+      if (!g.open) return std::u16string(tr(u"That game already has two players."));
+      return std::u16string();
+    };
+    r.activate = [](Env& env) {
+      if (!OnlineMine(env)) return;
+      const auto games = net::LanGames();
+      if (games.empty()) return;
+      const net::LanGame& g = games[size_t(std::clamp(g_online_pick, 0, int(games.size()) - 1))];
+      g_online_error = net::Join(g.address, g.port);
+      REXLOG_INFO("Online: Join {} at {}:{}: {}", g.name, g.address, g.port,
+                  g_online_error.empty() ? "joining" : g_online_error);
+    };
+    r.describe = [](Env&, int) { return WithStatus(tr(u"Join the game picked above as player 2.")); };
+    rows.push_back(std::move(r));
+  }
+  rows.push_back(Heading(tr(u"Session")));
+  {
+    Row r;
+    r.label = tr(u"Input Delay");
+    r.values = [](Env&) {
+      std::vector<std::u16string> v{tr(u"Automatic")};
+      for (int d = 3; d <= 15; ++d) v.push_back(trf(tr(u"{0} frames"), {Utf16(std::to_string(d))}));
+      return v;
+    };
+    r.get = [](Env&) {
+      return REXCVAR_GET(net_delay_auto) ? 0 : std::clamp(REXCVAR_GET(net_delay), 3, 15) - 2;
+    };
+    r.set = [](Env&, int i) {
+      if (i == 0) {
+        SetFlag("net_delay_auto", "true");
+        SetFlag("net_delay", "3");
+      } else {
+        SetFlag("net_delay_auto", "false");
+        SetFlag("net_delay", std::to_string(i + 2));
+      }
+    };
+    r.unavailable = [](Env&) {
+      const net::Status st = net::GetStatus();
+      if (st.role == net::Role::kGuest) return std::u16string(tr(u"The host decides."));
+      if (st.role == net::Role::kHost) return std::u16string(tr(u"Set it before hosting."));
+      return std::u16string();
+    };
+    r.describe = [](Env&, int i) {
+      return WithStatus(i == 0 ? tr(u"How long a press waits, so the other PC's input arrives in time. Automatic: "
+                                    u"the host measures the ping when player 2 joins.")
+                               : tr(u"How long a press waits, so the other PC's input arrives in time. More: "
+                                    u"slow links play smoothly, but presses feel later."));
+    };
+    rows.push_back(std::move(r));
+  }
+  {
+    Row r;
+    r.label = tr(u"Leave");
+    r.kind = Kind::kAction;
+    r.unavailable = [](Env&) {
+      return net::Configured() ? std::u16string() : std::u16string(tr(u"Not in an online game."));
+    };
+    r.activate = [](Env& env) {
+      if (!OnlineMine(env)) return;
+      net::Leave();
+      g_online_error.clear();
+      REXLOG_INFO("Online: Leave");
+    };
+    r.describe = [](Env&, int) {
+      return WithStatus(tr(u"Leave the online game (in a level, this PC plays on alone)."));
+    };
+    rows.push_back(std::move(r));
+  }
+  return rows;
+}
+
 std::vector<Tab> Build() {
   // THE LAYOUT (sorted 2026-10-24: Display = the screen and the window,
   // Graphics = how the picture is drawn; Camera folded into Gameplay's Co-op
@@ -1614,6 +1799,11 @@ std::vector<Tab> Build() {
   tabs.push_back({tr(u"Controls"), ControlsRows()});
   tabs.push_back({tr(u"Gameplay"), GameplayRows()});
   tabs.push_back({tr(u"Language"), {TextLanguageRow(), VoiceLanguageRow()}});
+  {
+    Tab online{tr(u"Multiplayer"), OnlineRows()};
+    online.live = true;
+    tabs.push_back(std::move(online));
+  }
   // The subtitles' rows under their heading (cyan, like Display's "HUD"),
   // with a sample line on screen while one of them has the cursor.
   tabs.push_back({tr(u"Accessibility"),
@@ -1654,6 +1844,14 @@ std::string TomlValue(const rex::cvar::FlagEntry& flag, const std::string& value
 const std::vector<Tab>& Tabs() {
   static const std::vector<Tab> tabs = Build();
   return tabs;
+}
+
+int OnlineTab() {
+  const auto& tabs = Tabs();
+  for (size_t i = 0; i < tabs.size(); ++i) {
+    if (tabs[i].live) return int(i);
+  }
+  return -1;
 }
 
 

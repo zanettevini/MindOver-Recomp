@@ -7,7 +7,8 @@
 // items (New Game, Load Game, Options, Players, Credits, Quit Game), close to
 // the prompt bar. The things a player looks for less often go one step in:
 //   first set:   New Game, Load Game, Options, Extras, Quit Game
-//   Extras set:  Players, Credits
+//   Extras set:  Multiplayer, Players, Credits (Multiplayer since 2026-11-18:
+//                the Options screen on its Multiplayer tab, LAN games)
 // It stays the game's own menu: the same list, font, cursor, sounds and
 // slide; picking Extras swaps the items shown, B swaps them back. (A "Back"
 // item was there for a day: B already says Back on the prompt bar.) Each set
@@ -40,6 +41,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <rex/ppc/context.h>
 
@@ -66,5 +68,10 @@ bool Swapping();
 // don't play this one (the main menu screen's B sound while the Extras set
 // shows; `return_address` = the player's caller).
 bool DropSound(uint32_t return_address);
+
+// For the debug console's "frontend": "main menu: set first|extras, item N,
+// input on|off" (the list's selection, item indices in options/options_page.h)
+// or "main menu: none".
+std::string DebugText();
 
 }  // namespace main_menu_extras

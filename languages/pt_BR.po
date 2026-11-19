@@ -5040,6 +5040,191 @@ msgstr "Copiando os arquivos da nova versão"
 #: launcher/update.cpp:521
 msgid "Starting the new version's installer"
 msgstr ""
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Multiplayer"
+msgstr "Multijogador"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Host"
+msgstr "Hospedar"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Host a Game"
+msgstr "Hospedar uma partida"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Join"
+msgstr "Entrar"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Game"
+msgstr "Partida"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Session"
+msgstr "Sessão"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Input Delay"
+msgstr "Atraso dos comandos"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Leave"
+msgstr "Sair"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "{0} frames"
+msgstr "{0} quadros"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Searching..."
+msgstr "Procurando..."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "another version"
+msgstr "outra versão"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "full"
+msgstr "cheia"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Not in an online game."
+msgstr "Fora de uma partida online."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Couldn't start: {0}"
+msgstr "Não deu para começar: {0}"
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Hosting: waiting for player 2 to join."
+msgstr "Hospedando: esperando o jogador 2 entrar."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Player 2 left: playing on alone."
+msgstr "O jogador 2 saiu: jogando sozinho."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Playing online with {0}."
+msgstr "Jogando online com {0}."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Player 2 joined ({0}). Now both players: Load Game, the same save."
+msgstr "O jogador 2 entrou ({0}). Agora os dois jogadores: Carregar Jogo, o mesmo save."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Joining {0}..."
+msgstr "Entrando em {0}..."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "The host left: playing on alone."
+msgstr "O anfitrião saiu: jogando sozinho."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Joined {0}. Now both players: Load Game, the same save."
+msgstr "Conectado a {0}. Agora os dois jogadores: Carregar Jogo, o mesmo save."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Ping {0} ms, input delay {1} frames."
+msgstr "Ping de {0} ms, atraso dos comandos de {1} quadros."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "The two games' settings differ: make them alike, or the games will part."
+msgstr "As configurações dos dois jogos são diferentes: deixe-as iguais, ou os jogos vão se separar."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "The two games no longer show the same world."
+msgstr "Os dois jogos não mostram mais o mesmo mundo."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Already in an online game: Leave first."
+msgstr "Já está em uma partida online: saia primeiro."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Only from the main menu (a session starts when both load a save)."
+msgstr "Só pelo menu principal (a sessão começa quando os dois carregam um save)."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Wait for player 2 here: the PCs on this network see this game in their list."
+msgstr "Espere o jogador 2 aqui: os PCs desta rede veem esta partida na lista deles."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "The games hosted on this network. Pick one, then Join."
+msgstr "As partidas hospedadas nesta rede. Escolha uma e depois Entrar."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "No game found on this network yet."
+msgstr "Nenhuma partida encontrada nesta rede ainda."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "That game runs another version of Mind over Recomp."
+msgstr "Essa partida usa outra versão do Mind over Recomp."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "That game already has two players."
+msgstr "Essa partida já tem dois jogadores."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Join the game picked above as player 2."
+msgstr "Entra na partida escolhida acima como jogador 2."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "The host decides."
+msgstr "O anfitrião decide."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Set it before hosting."
+msgstr "Escolha antes de hospedar."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "How long a press waits, so the other PC's input arrives in time. Automatic: the host measures the ping when player 2 joins."
+msgstr "Quanto um comando espera, para que o do outro PC chegue a tempo. Automático: o anfitrião mede o ping quando o jogador 2 entra."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "How long a press waits, so the other PC's input arrives in time. More: slow links play smoothly, but presses feel later."
+msgstr "Quanto um comando espera, para que o do outro PC chegue a tempo. Mais: conexões lentas ficam fluidas, mas os comandos parecem mais atrasados."
+
+#: src/options/options_settings.cpp
+#, fuzzy
+msgid "Leave the online game (in a level, this PC plays on alone)."
+msgstr "Sai da partida online (numa fase, este PC continua sozinho)."
+
 
 #, fuzzy
 #~ msgid "Camera Follows"
