@@ -699,6 +699,11 @@ folders with the same save; `tools/lan_tests/menu_one_pc.ps1` +
   then player 2 dropped in with START on the guest's pad (the mask, on both
   PCs) and pressed a few buttons: in sync through session frame 1,798, both
   PCs' `players` alike (p2 at (-16.32, -10.5, -34.76)).
+* menu5's photos: once joined, the Host card's help + "Player 2 joined
+  (127.0.0.1:55537)..." + the ping ran into the card's warning. In an online
+  game the card shows the status alone now, the address without its port.
+  menu6 (21:54): the card reads cleanly; the whole run again in sync
+  through session frame 1,798.
 
 ## 7. Not yet
 
